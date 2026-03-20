@@ -1,9 +1,12 @@
 import torch
+from torch import nn
 import pandas as pd
 import torch.nn.functional as F
 from torch.utils.data import Dataset
-from typing import List, Tuple, Union, Dict, Any
+from typing import List, Tuple, Union, Dict, Any, Optional
 import random
+import numpy as np
+from tqdm import tqdm
 
 class ClientTransactionsDataset(Dataset):
     """
@@ -17,7 +20,7 @@ class ClientTransactionsDataset(Dataset):
         - MCC_vocab (Dict): Словарь соответствия значений MCC их индексам.
     """
     
-    def __init__(self, df: pd.DataFrame):
+    def __init__(self, df: pd.DataFrame, MCC_vocab=None):
         """
         Инициализация датасета и предварительная обработка данных.
         
@@ -27,11 +30,15 @@ class ClientTransactionsDataset(Dataset):
         
         # Валидация входных данных
         required_columns = {'cl_id', 'amount', 'MCC'}
+
         if not required_columns.issubset(df.columns):
             raise ValueError(f"DataFrame должен содержать колонки: {required_columns}")
         
+        self.label = "target_flag" in df.columns
+        
         self.cl_ids: List[int] = []
         self.transactions: List[torch.Tensor] = []
+        self.labels: List[int] = []
         
         # Сортировка обеспечивает детерминированность порядка классов
         unique_MCCs = sorted(df['MCC'].unique())
@@ -42,7 +49,8 @@ class ClientTransactionsDataset(Dataset):
         grouped = df.groupby('cl_id', sort=True)
         
         for cl_id, group in grouped:
-            self.cl_ids.append(cl_id)
+            self.cl_ids.append(cl_id) # type: ignore
+            group.sort_values("TRDATETIME")
             
             # Обработка поля amount
             # Приведение к тензору и добавление размерности [N, 1]
@@ -54,11 +62,14 @@ class ClientTransactionsDataset(Dataset):
             MCC_tensor = torch.tensor(MCC_indices, dtype=torch.long).unsqueeze(1)
                         
             # Конкатенация признаков: [amount, MCC_one_hot...]
-            # Итоговая размерность транзакции: [1 + MCC_vocab_size]
+            # Итоговая размерность последовательности: [N, 1 + MCC_vocab_size]
             features = torch.cat([amounts, MCC_tensor], dim=1)
             
             self.transactions.append(features)
             
+            if self.label:
+                self.labels.append(group["target_flag"].iloc[0])
+
     def __len__(self) -> int:
         """
         Возвращает количество уникальных клиентов в датасете.
@@ -68,7 +79,7 @@ class ClientTransactionsDataset(Dataset):
         """
         return len(self.cl_ids)
     
-    def __getitem__(self, idx: int) -> Tuple[Union[int, str], torch.Tensor]:
+    def __getitem__(self, idx: int) -> Tuple[Union[int, str], torch.Tensor, Optional[int]]:
         """
         Возвращает данные для клиента по индексу.
         
@@ -86,11 +97,13 @@ class ClientTransactionsDataset(Dataset):
             
         cl_id = self.cl_ids[idx]
         features = self.transactions[idx]
-        
-        return cl_id, features
+
+        if self.label:
+            return cl_id, features, self.labels[idx]
+        return cl_id, features, None
     
 def random_slices_collate_fn(
-    batch: List[Tuple[Any, torch.Tensor]], 
+    batch: List[Tuple[Any, torch.Tensor, Any]], 
     m: int, 
     M: int, 
     k: int,
@@ -122,7 +135,7 @@ def random_slices_collate_fn(
     subsequences = []
     lengths = []
     
-    for client_id, transactions in batch:
+    for client_id, transactions, _ in batch:
         T = transactions.shape[0]  # Длина исходной последовательности
         
         # Генерация k случайных подпоследовательностей
@@ -172,3 +185,38 @@ def random_slices_collate_fn(
     lengths = torch.tensor(lengths, dtype=torch.long)
     
     return cl_ids, padded_subsequences, lengths
+
+def create_vector_dataset(model: torch.nn.Module, dataset: ClientTransactionsDataset, embedding_size: int) -> Tuple[np.ndarray, List]:
+    """
+    Кодирует набор данных транзакций в векторные представления с использованием предоставленной модели.
+
+    :param model: Модуль нейронной сети, используемый для кодирования транзакций.
+    :type model: torch.nn.Module
+    :param data: Набор данных, содержащий транзакции клиентов и соответствующие метки.
+    :type data: ClientTransactionsDataset
+    :param embedding_size: Размерность выходных векторов эмбеддингов.
+    :type embedding_size: int
+    :return: Кортеж, содержащий матрицу кодированных векторов и список меток.
+    :rtype: Tuple[np.ndarray, list]
+    """
+    model.eval()
+    vector_dataset = np.empty(shape=[0, embedding_size])
+    labels = dataset.labels
+
+    dataloader = torch.utils.data.DataLoader(
+        dataset,
+        shuffle=False,
+        batch_size=64,
+        collate_fn=lambda batch: random_slices_collate_fn(batch, 10000, 10000, 1),
+        drop_last=False
+    )
+    pbar = tqdm(dataloader, desc="Creating vector dataset")
+    for ids, transactions, lengths in pbar:
+        packed_inputs = nn.utils.rnn.pack_padded_sequence(
+            transactions,
+            lengths=lengths,
+            batch_first=True,
+            enforce_sorted=False
+        )
+        vector_dataset = np.concat([vector_dataset, model(packed_inputs).detach().numpy()])
+    return vector_dataset, labels
