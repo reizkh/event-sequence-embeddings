@@ -4,6 +4,7 @@ from loss import contrastive_loss_euclidean
 
 import mlflow
 import mlflow.artifacts
+import dagshub
 from datasets import load_dataset
 from torch import nn
 import torch
@@ -119,6 +120,7 @@ val_dataloader = torch.utils.data.DataLoader(
     drop_last=True
 )
 
+dagshub.init("event-sequence-embeddings", "reizkh")
 with mlflow.start_run() as run:
     mlflow.log_params(hyperparams)
     
@@ -191,7 +193,7 @@ with mlflow.start_run() as run:
         embedding_size=category_embedding_size, 
         hidden_size=embedding_size
     ).to(device)
-    best_encoder.load_state_dict(torch.load(path))
+    best_encoder.load_state_dict(torch.load(path, map_location=device))
 
     cv_vector_dataset, cv_labels = create_vector_dataset(best_encoder, boosting_cv_dataset, embedding_size, device)
     test_vector_dataset, test_labels = create_vector_dataset(best_encoder, test_dataset, embedding_size, device)
