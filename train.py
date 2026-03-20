@@ -88,11 +88,12 @@ hyperparams = {
 
 
 # 3. Initialize model
+device = "cuda" if torch.cuda.is_available() else "cpu"
 encoder = LSTMEncoder(
     vocab_size=vocab_size,
     embedding_size=category_embedding_size, 
     hidden_size=embedding_size
-)
+).to(device)
 
 
 # 4. Train encoder
@@ -136,7 +137,7 @@ with mlflow.start_run() as run:
                 lengths=lengths,
                 batch_first=True,
                 enforce_sorted=False
-            )
+            ).to(device)
             embeddings = encoder.forward(packed_inputs)
 
             loss = contrastive_loss_euclidean(ids, embeddings)
@@ -163,7 +164,7 @@ with mlflow.start_run() as run:
                 lengths=lengths,
                 batch_first=True,
                 enforce_sorted=False
-            )
+            ).to(device)
             embeddings = encoder.forward(packed_inputs)
 
             loss = contrastive_loss_euclidean(ids, embeddings)
@@ -189,11 +190,11 @@ with mlflow.start_run() as run:
         vocab_size=hyperparams["vocab_size"], 
         embedding_size=category_embedding_size, 
         hidden_size=embedding_size
-    )
+    ).to(device)
     best_encoder.load_state_dict(torch.load(path))
 
-    cv_vector_dataset, cv_labels = create_vector_dataset(best_encoder, boosting_cv_dataset, embedding_size)
-    test_vector_dataset, test_labels = create_vector_dataset(best_encoder, test_dataset, embedding_size)
+    cv_vector_dataset, cv_labels = create_vector_dataset(best_encoder, boosting_cv_dataset, embedding_size, device)
+    test_vector_dataset, test_labels = create_vector_dataset(best_encoder, test_dataset, embedding_size, device)
 
     scaler = StandardScaler()
     cv_vector_dataset = scaler.fit_transform(cv_vector_dataset)

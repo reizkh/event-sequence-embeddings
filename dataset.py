@@ -186,7 +186,7 @@ def random_slices_collate_fn(
     
     return cl_ids, padded_subsequences, lengths
 
-def create_vector_dataset(model: torch.nn.Module, dataset: ClientTransactionsDataset, embedding_size: int) -> Tuple[np.ndarray, List]:
+def create_vector_dataset(model: torch.nn.Module, dataset: ClientTransactionsDataset, embedding_size: int, device) -> Tuple[np.ndarray, List]:
     """
     Кодирует набор данных транзакций в векторные представления с использованием предоставленной модели.
 
@@ -217,6 +217,6 @@ def create_vector_dataset(model: torch.nn.Module, dataset: ClientTransactionsDat
             lengths=lengths,
             batch_first=True,
             enforce_sorted=False
-        )
+        ).to(device)
         vector_dataset = np.concat([vector_dataset, model(packed_inputs).detach().numpy()])
     return vector_dataset, labels
