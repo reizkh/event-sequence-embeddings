@@ -18,8 +18,8 @@ hyperparams_distributions = {
     "category_embedding_size": [128],
     "num_epochs": [15, 30, 60],
     "margin": linspace(0.1, 0.6),
-    "learning_rate": logspace(1e-4, 1e-1),
-    "weight_decay": logspace(1e-6, 1e-2),
+    "learning_rate": logspace(-4, -1),
+    "weight_decay": logspace(-6, -2),
     "n_samples_in_batch": [64],
     "subseq_min": [5, 10, 15, 20, 25, 30],
     "subseq_max": [100, 125, 150, 175, 200, 250],
@@ -36,8 +36,8 @@ sampler = ParameterSampler(
 
 device = "cuda" if torch.cuda.is_available() else "cpu"
 
-for hyperparams in tqdm(sampler, desc="Random search of hyperparameters"):
-    dagshub.init("event-sequence-embeddings", "reizkh")
+dagshub.init("event-sequence-embeddings", "reizkh")
+for hyperparams in tqdm(sampler, desc="Random search of hyperparameters", leave=False):
     with mlflow.start_run() as run:
         mlflow.log_params(hyperparams)
 
