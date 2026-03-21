@@ -6,7 +6,9 @@ from torch.utils.data import Dataset
 from typing import List, Tuple, Union, Dict, Any, Optional
 import random
 import numpy as np
-from tqdm import tqdm
+from tqdm.auto import tqdm
+from datasets import load_dataset
+from sklearn.model_selection import train_test_split
 
 class ClientTransactionsDataset(Dataset):
     """
@@ -220,3 +222,58 @@ def create_vector_dataset(model: torch.nn.Module, dataset: ClientTransactionsDat
         ).to(device)
         vector_dataset = np.concat([vector_dataset, model(packed_inputs).detach().cpu().numpy()])
     return vector_dataset, labels
+
+def load_and_split_data(
+    labeled_dataset_path: str,
+    unlabeled_dataset_path: str,
+    test_size: float = 0.15,
+    val_ratio: float = 0.7,
+    random_state: int = 0,
+    mcc_coverage: float = 0.9
+) -> Tuple[ClientTransactionsDataset, ClientTransactionsDataset, ClientTransactionsDataset, ClientTransactionsDataset, int]:
+    """
+    Загружает датасеты, объединяет размеченные и неразмеченные данные,
+    выполняет разбиение по клиентам и фильтрацию редких MCC-кодов.
+    """
+    ds_labeled = load_dataset(labeled_dataset_path, "train")
+    labeled_df: pd.DataFrame = ds_labeled["train"].to_pandas().drop(["target_sum"], axis=1)  # type: ignore
+
+    ds_unlabeled = load_dataset(unlabeled_dataset_path, "test")
+    unlabeled_df: pd.DataFrame = ds_unlabeled["train"].to_pandas()  # type: ignore
+    unlabeled_df["target_flag"] = None
+
+    full_df = pd.concat([labeled_df, unlabeled_df], ignore_index=True)
+    full_df["cl_id"] = pd.factorize(full_df.cl_id)[0]
+
+    labeled_clients = full_df.loc[~full_df["target_flag"].isna(), "cl_id"].unique()
+    enc_train_clients_A = full_df.loc[full_df["target_flag"].isna(), "cl_id"].unique()
+    
+    crossval_clients, test_clients = train_test_split(
+        labeled_clients, test_size=test_size, random_state=random_state
+    )
+    enc_train_clients_B, val_clients = train_test_split(
+        crossval_clients, test_size=(1 - val_ratio) * test_size, random_state=random_state
+    )
+    
+    enc_train_clients = np.concatenate([enc_train_clients_A, enc_train_clients_B])
+
+    # Фильтрация MCC
+    mask_train = full_df["cl_id"].isin(enc_train_clients)
+    mcc_counts = full_df.loc[mask_train, "MCC"].value_counts(normalize=True)
+    most_frequent_mcc = mcc_counts[mcc_counts.cumsum() < mcc_coverage].index
+    vocab_size = len(most_frequent_mcc) + 1
+    
+    full_df["MCC"] = full_df["MCC"].where(full_df["MCC"].isin(most_frequent_mcc), -1)
+
+    enc_train_df = full_df[full_df["cl_id"].isin(enc_train_clients)]
+    enc_val_df = full_df[full_df["cl_id"].isin(val_clients)]
+    crossval_df = full_df[full_df["cl_id"].isin(crossval_clients)]
+    test_df = full_df[full_df["cl_id"].isin(test_clients)]
+
+    return (
+        ClientTransactionsDataset(enc_train_df),
+        ClientTransactionsDataset(enc_val_df),
+        ClientTransactionsDataset(crossval_df),
+        ClientTransactionsDataset(test_df),
+        vocab_size
+    )

@@ -1,7 +1,6 @@
 import torch
 import torch.nn as nn
 from torch.nn.utils.rnn import PackedSequence
-from typing import Tuple
 
 class LSTMEncoder(nn.Module):
     """   
