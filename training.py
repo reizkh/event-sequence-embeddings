@@ -100,7 +100,7 @@ def train_encoder(
             ).to(device)
             
             embeddings = encoder(packed_inputs)
-            loss = contrastive_loss_euclidean(ids, embeddings)
+            loss = contrastive_loss_euclidean(ids, embeddings, margin=hyperparams["margin"])
             loss.backward()
             
             loss_value = loss.item()
@@ -121,7 +121,7 @@ def train_encoder(
                     transactions, lengths=lengths, batch_first=True, enforce_sorted=False
                 ).to(device)
                 embeddings = encoder(packed_inputs)
-                loss = contrastive_loss_euclidean(ids, embeddings)
+                loss = contrastive_loss_euclidean(ids, embeddings, margin=hyperparams["margin"])
                 total_val_loss += loss.item()
 
         avg_val_loss = total_val_loss / len(val_loader)
