@@ -11,10 +11,26 @@ import mlflow.artifacts
 from tqdm.auto import trange, tqdm
 import os
 from sklearn.linear_model import LogisticRegression
-from sklearn.model_selection import RandomizedSearchCV
+from sklearn.model_selection import RandomizedSearchCV, train_test_split
 from sklearn.base import BaseEstimator
 import lightgbm as lgb
 from scipy.stats import uniform, randint
+
+
+class LGBMWithEarlyStopping(lgb.LGBMClassifier):
+    def __init__(self, val_split=0.2, early_stopping_rounds=50, **kwargs):
+        super().__init__(**kwargs)
+        self.val_split = val_split
+        self.early_stopping_rounds = early_stopping_rounds
+
+    def fit(self, X, y, **fit_params):
+        X_train, X_val, y_train, y_val = train_test_split(
+            X, y, test_size=self.val_split, random_state=42, stratify=y if hasattr(y, 'dtype') else None
+        )
+        fit_params["eval_set"] = [(X_val, y_val)]
+        fit_params["eval_metric"] = "auc"
+
+        return super().fit(X_train, y_train, **fit_params)
 
 
 def train_encoder(
@@ -142,35 +158,24 @@ def run_classifier_cv(
     cv_vector_dataset: np.ndarray,
     cv_labels: List,
     hyperparams: Dict[str, Any],
-
+    clf_hyperparams: Dict[str, Any]
 ) -> BaseEstimator:
+    param_distributions = clf_hyperparams[hyperparams["classifier"]]
+
     if hyperparams["classifier"] == "logistic_regression":
         model = LogisticRegression()
-        param_distributions = { "C": np.logspace(-3, 2, 10) }
     elif hyperparams["classifier"] == "lightgbm":
-        model = lgb.LGBMClassifier(
-            objective='binary',
+        model = LGBMWithEarlyStopping(
+            objective="binary",
             n_jobs=-1,
             verbose=-1
         )
 
-        param_distributions = {
-            'n_estimators': randint(10, 200),
-            'max_depth': randint(3, 15),
-            'learning_rate': np.logspace(-3, 0),
-            'num_leaves': randint(10, 100),
-            'subsample': uniform(0.6, 0.4),
-            'colsample_bytree': uniform(0.6, 0.4),
-            'min_child_samples': randint(1, 100),
-            'reg_alpha': uniform(0, 1),
-            'reg_lambda': uniform(0, 1)
-        }
-    
     rs = RandomizedSearchCV(
         estimator=model, # type: ignore
         param_distributions=param_distributions,
         n_iter=30,
-        scoring='roc_auc',
+        scoring="roc_auc",
         cv=5,
         verbose=3,
         n_jobs=-1,
