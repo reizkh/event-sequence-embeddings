@@ -70,7 +70,6 @@ def train_encoder(
     )
 
     best_loss = float('inf')
-    global_step = 0
 
     for epoch in trange(hyperparams["num_epochs"], desc="Epoch"):
         # --- Training Phase ---
@@ -91,8 +90,6 @@ def train_encoder(
             loss_value = loss.item()
             total_train_loss += loss_value
             
-            mlflow.log_metric("batch_loss", loss_value, step=global_step)
-            global_step += 1
             optimizer.step()
 
         avg_train_loss = total_train_loss / len(train_loader)

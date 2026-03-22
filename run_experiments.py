@@ -37,6 +37,7 @@ sampler = ParameterSampler(
 device = "cuda" if torch.cuda.is_available() else "cpu"
 
 dagshub.init("event-sequence-embeddings", "reizkh")
+# mlflow.config.enable_async_logging()
 for hyperparams in tqdm(sampler, desc="Random search of hyperparameters", leave=False):
     with mlflow.start_run() as run:
         mlflow.log_params(hyperparams)
