@@ -13,59 +13,84 @@ from sklearn.model_selection import train_test_split
 class ClientTransactionsDataset(Dataset):
     """
     Класс датасета для загрузки транзакций клиентов.
-    
-    Данные группируются по полю 'cl_id'. Поле 'MCC' преобразуется в индекс по словарю.
-    
+
+    Данные группируются по полю 'cl_id'. Категориальные признаки преобразуются 
+    в индексы на основе предоставленных или автоматически сгенерированных словарей.
+
     Атрибуты:
         - cl_ids (List): Список уникальных идентификаторов клиентов.
         - transactions (List[torch.Tensor]): Список тензоров признаков для каждого клиента.
-        - MCC_vocab (Dict): Словарь соответствия значений MCC их индексам.
+        - labels (List[int]): Список целевых меток (при наличии).
+        - cat_vocabularies (Dict[str, Dict]): Словари соответствия значений категориальных 
+          признаков их индексам для каждой колонки.
+        - cat_cols (List[str]): Список имен колонок с категориальными признаками.
     """
     
-    def __init__(self, df: pd.DataFrame, MCC_vocab=None):
+    def __init__(
+        self, 
+        df: pd.DataFrame, 
+        cat_cols: List[str], 
+    ):
         """
         Инициализация датасета и предварительная обработка данных.
-        
-        :param pd.DataFrame df: DataFrame, содержащий колонки 'cl_id', 'amount', 'MCC'.
+
+        :param pd.DataFrame df: DataFrame, содержащий колонки 'cl_id', 'amount', 
+                                а также указанные категориальные колонки.
+        :param List[str] cat_cols: Список имен колонок, содержащих категориальные признаки.
         """
         super().__init__()
         
         # Валидация входных данных
-        required_columns = {'cl_id', 'amount', 'MCC'}
+        required_columns = {'cl_id', 'amount'}.union(set(cat_cols))
 
         if not required_columns.issubset(df.columns):
-            raise ValueError(f"DataFrame должен содержать колонки: {required_columns}")
+            missing = required_columns - set(df.columns)
+            raise ValueError(f"DataFrame должен содержать колонки: {missing}")
         
         self.label = "target_flag" in df.columns
+        self.cat_cols = cat_cols
         
-        self.cl_ids: List[int] = []
+        self.cl_ids: List[Union[int, str]] = []
         self.transactions: List[torch.Tensor] = []
         self.labels: List[int] = []
         
-        # Сортировка обеспечивает детерминированность порядка классов
-        unique_MCCs = sorted(df['MCC'].unique())
-        self.MCC_vocab: Dict[Union[int, str], int] = {val: idx for idx, val in enumerate(unique_MCCs)}
-        self.MCC_vocab_size: int = len(unique_MCCs)
+        # Инициализация словарей для категориальных признаков
+        self.cat_vocabularies: Dict[str, Dict[Union[int, str], int]] = {}
+        self.cat_vocab_sizes: Dict[str, int] = {}
+        
+        for col in cat_cols:
+            # Автоматическое построение словаря на основе данных
+            # Сортировка обеспечивает детерминированность порядка классов
+            unique_values = sorted(df[col].unique())
+            self.cat_vocabularies[col] = {val: idx for idx, val in enumerate(unique_values)}
+            self.cat_vocab_sizes[col] = len(unique_values)
         
         # Группировка данных по cl_id
         grouped = df.groupby('cl_id', sort=True)
         
         for cl_id, group in grouped:
             self.cl_ids.append(cl_id) # type: ignore
-            group.sort_values("TRDATETIME")
+            # Сортировка транзакций по времени внутри группы
+            group = group.sort_values("TRDATETIME")
             
-            # Обработка поля amount
+            # Обработка числовых признаков (amount)
             # Приведение к тензору и добавление размерности [N, 1]
             amounts = torch.tensor(group['amount'].values, dtype=torch.float32).unsqueeze(1)
             
-            # Обработка поля MCC
-            # Маппинг значений MCC в индексы классов
-            MCC_indices = [self.MCC_vocab[m] for m in group['MCC']]
-            MCC_tensor = torch.tensor(MCC_indices, dtype=torch.long).unsqueeze(1)
+            # Обработка категориальных признаков
+            cat_tensors = []
+            for col in cat_cols:
+                # Маппинг значений колонки в индексы классов
+                indices = [self.cat_vocabularies[col][m] for m in group[col]]
+                cat_tensor = torch.tensor(indices, dtype=torch.long).unsqueeze(1)
+                cat_tensors.append(cat_tensor)
                         
-            # Конкатенация признаков: [amount, MCC_one_hot...]
-            # Итоговая размерность последовательности: [N, 1 + MCC_vocab_size]
-            features = torch.cat([amounts, MCC_tensor], dim=1)
+            # Конкатенация признаков: [amount, cat_col_1, cat_col_2, ...]
+            # Итоговая размерность последовательности: [N, 1 + len(cat_cols)]
+            if cat_tensors:
+                features = torch.cat([amounts] + cat_tensors, dim=1)
+            else:
+                features = amounts
             
             self.transactions.append(features)
             
@@ -75,7 +100,7 @@ class ClientTransactionsDataset(Dataset):
     def __len__(self) -> int:
         """
         Возвращает количество уникальных клиентов в датасете.
-        
+
         :returns: Количество элементов (уникальных ``cl_id``).
         :rtype: int
         """
@@ -84,15 +109,16 @@ class ClientTransactionsDataset(Dataset):
     def __getitem__(self, idx: int) -> Tuple[Union[int, str], torch.Tensor, Optional[int]]:
         """
         Возвращает данные для клиента по индексу.
-        
+
         :param int idx: Индекс клиента в диапазоне ``[0, len(self) - 1]``.
             
-        :rtype: Tuple[Union[int, str], torch.Tensor]
+        :rtype: Tuple[Union[int, str], torch.Tensor, Optional[int]]
         :returns:
-        Кортеж ``(cl_id, features)`` содержащий:
+        Кортеж ``(cl_id, features, label)`` содержащий:
 
-        * ``cl_id`` — (идентификатор клиента).
-        * ``features`` — (тензор размера ``[N_transactions, 2]``).
+        * ``cl_id`` — идентификатор клиента.
+        * ``features`` — тензор размера ``[N_transactions, 1 + len(cat_cols)]``.
+        * ``label`` — целевая метка (или None, если отсутствует).
         """
         if idx >= len(self):
             raise IndexError(f"Индекс {idx} выходит за границы датасета (размер: {len(self)})")
@@ -229,8 +255,9 @@ def load_and_split_data(
     test_size: float = 0.15,
     val_ratio: float = 0.7,
     random_state: int = 0,
-    mcc_coverage: float = 0.9
-) -> Tuple[ClientTransactionsDataset, ClientTransactionsDataset, ClientTransactionsDataset, ClientTransactionsDataset, int]:
+    cat_features: List = ["MCC"],
+    cat_coverage: float = 0.9
+) -> Tuple[ClientTransactionsDataset, ClientTransactionsDataset, ClientTransactionsDataset, ClientTransactionsDataset, List]:
     """
     Загружает датасеты, объединяет размеченные и неразмеченные данные,
     выполняет разбиение по клиентам и фильтрацию редких MCC-кодов.
@@ -257,13 +284,14 @@ def load_and_split_data(
     
     enc_train_clients = np.concatenate([enc_train_clients_A, enc_train_clients_B])
 
-    # Фильтрация MCC
     mask_train = full_df["cl_id"].isin(enc_train_clients)
-    mcc_counts = full_df.loc[mask_train, "MCC"].value_counts(normalize=True)
-    most_frequent_mcc = mcc_counts[mcc_counts.cumsum() < mcc_coverage].index
-    vocab_size = len(most_frequent_mcc) + 1
-    
-    full_df["MCC"] = full_df["MCC"].where(full_df["MCC"].isin(most_frequent_mcc), -1)
+    vocab_sizes = []
+    for cat_feature in cat_features:
+        feature_value_counts = full_df.loc[mask_train, cat_feature].value_counts(normalize=True)
+        most_frequent_values = feature_value_counts[feature_value_counts.cumsum() < cat_coverage].index
+        vocab_sizes.append(len(most_frequent_values) + 1)
+        
+        full_df[cat_feature] = full_df[cat_feature].astype(str).where(full_df[cat_feature].isin(most_frequent_values), "rare")
 
     enc_train_df = full_df[full_df["cl_id"].isin(enc_train_clients)]
     enc_val_df = full_df[full_df["cl_id"].isin(val_clients)]
@@ -271,9 +299,9 @@ def load_and_split_data(
     test_df = full_df[full_df["cl_id"].isin(test_clients)]
 
     return (
-        ClientTransactionsDataset(enc_train_df),
-        ClientTransactionsDataset(enc_val_df),
-        ClientTransactionsDataset(crossval_df),
-        ClientTransactionsDataset(test_df),
-        vocab_size
+        ClientTransactionsDataset(enc_train_df, cat_features),
+        ClientTransactionsDataset(enc_val_df, cat_features),
+        ClientTransactionsDataset(crossval_df, cat_features),
+        ClientTransactionsDataset(test_df, cat_features),
+        vocab_sizes
     )

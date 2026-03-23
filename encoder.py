@@ -1,47 +1,77 @@
 import torch
 import torch.nn as nn
 from torch.nn.utils.rnn import PackedSequence
+from typing import List
 
 class LSTMEncoder(nn.Module):
-    """   
-    Данный модуль принимает на вход упакованную последовательность и возвращает
-    финальные состояния скрытого слоя и ячейки памяти, которые могут быть использованы
-    как векторное представление исходной последовательности.
+    """
+    Модуль кодирования последовательностей на основе архитектуры LSTM.
     
-    :param input_size: Размерность входных признаков (количество_FEATURES в одном шаге времени).
-    :type input_size: int
-    :param hidden_size: Размерность скрытого состояния (количество нейронов в скрытом слое).
-    :type hidden_size: int
-    :param batch_first: Если True, то входные и выходные тензоры имеют размерность 
-                        (batch, seq, feature). Рекомендуется устанавливать True для 
-                        совместимости с DataLoader.
-    :type batch_first: bool, optional
+    Данный модуль принимает на вход упакованную последовательность (PackedSequence), 
+    содержащую смешанные числовые и категориальные признаки, и возвращает 
+    векторное представление последовательности на основе финального скрытого состояния.
+    
+    Поддерживается динамическая конфигурация входных признаков:
+    - Произвольное количество числовых признаков (подвергаются нормализации).
+    - Произвольное количество категориальных признаков (подвергаются эмбеддингу).
+    
+    Атрибуты:
+        - numerical_bn (nn.Module): Слой нормализации для числовых признаков.
+        - categorical_embeddings (nn.ModuleList): Список слоев эмбеддинга для категориальных признаков.
+        - lstm (nn.LSTM): Основной слой долгой краткосрочной памяти.
     """
     
     def __init__(
         self, 
-        vocab_size: int,
-        embedding_size: int,
+        cat_vocab_sizes: List[int],
+        cat_embedding_dims: List[int],
         hidden_size: int, 
-        batch_first: bool = True
+        batch_first: bool = True,
+        num_numerical_features: int = 1
     ):
+        """
+        Инициализация компонентов модели.
+
+        :param int num_numerical_features: Количество числовых признаков во входных данных 
+                                           (например, 'amount').
+        :param List[int] cat_vocab_sizes: Список размеров словарей для каждого категориального признака.
+        :param List[int] cat_embedding_dims: Список размерностей эмбеддинга для каждого 
+                                             категориального признака.
+        :param int hidden_size: Размерность скрытого состояния LSTM.
+        :param bool batch_first: Флаг формата входных данных (рекомендуется True).
+        """
         super(LSTMEncoder, self).__init__()
         
-        self.vocab_size = vocab_size
-        self.embedding_size = embedding_size
+        self.num_numerical_features = num_numerical_features
+        self.cat_vocab_sizes = cat_vocab_sizes
+        self.cat_embedding_dims = cat_embedding_dims
         self.hidden_size = hidden_size
         self.batch_first = batch_first
-
-
-        self.embedding = nn.Embedding(
-            num_embeddings=vocab_size,
-            embedding_dim=embedding_size
-        )        
-        self.bn = nn.BatchNorm1d(1)
-
+        
+        # Валидация входных параметров
+        if len(cat_vocab_sizes) != len(cat_embedding_dims):
+            raise ValueError("Списки cat_vocab_sizes и cat_embedding_dims должны иметь одинаковую длину.")
+        
+        # Инициализация нормализации для числовых признаков
+        if num_numerical_features > 0:
+            self.numerical_bn = nn.BatchNorm1d(num_numerical_features)
+        else:
+            self.numerical_bn = nn.Identity()
+        
+        # Инициализация слоев эмбеддинга для категориальных признаков
+        self.categorical_embeddings = nn.ModuleList([
+            nn.Embedding(num_embeddings=vocab_size, embedding_dim=embed_dim)
+            for vocab_size, embed_dim in zip(cat_vocab_sizes, cat_embedding_dims)
+        ])
+        
+        total_embedding_dim = sum(cat_embedding_dims)
+        input_size = num_numerical_features + hidden_size
+        
+        self.linear = nn.Linear(in_features=total_embedding_dim, out_features=hidden_size)
+        
         # Инициализация LSTM слоя
         self.lstm = nn.LSTM(
-            input_size=embedding_size+1,
+            input_size=input_size,
             hidden_size=hidden_size,
             num_layers=1,
             batch_first=batch_first,
@@ -52,43 +82,54 @@ class LSTMEncoder(nn.Module):
         """
         Прямой проход через энкодер.
         
-        :param packed_input: Упакованная последовательность входных данных. 
-                             Объект типа ``PackedSequence``, содержащий данные формы 
-                             ``[batch, seq, feature]``.
-        :type packed_input: PackedSequence
+        Осуществляет разделение входных данных на числовые и категориальные части,
+        применяет соответствующие преобразования (нормализация, эмбеддинг) и передает
+        результат в LSTM.
+
+        :param PackedSequence packed_input: Упакованная последовательность входных данных. 
+                                            Данные должны иметь структуру [TotalSteps, TotalFeatures],
+                                            где первые колонки — числовые признаки, последующие — 
+                                            индексы категориальных признаков.
         
         :rtype: torch.Tensor
-        :return: Финальное скрытое состояние размера ``[batch, hidden_size]``.
+        :return: Финальное скрытое состояние размера ``[batch_size, hidden_size]``.
         """
-        amounts = packed_input.data[:,0]
-        MCC = packed_input.data[:,1].long()
-
-        amounts = self.bn(amounts.unsqueeze(1))
-        MCC_embeddings = self.embedding(MCC)
-        input = packed_input._replace(data=torch.cat([amounts, MCC_embeddings], dim=1))
-
-        # LSTM автоматически обрабатывает PackedSequence, игнорируя padding
-        _, (h_n, c_n) = self.lstm(input)
+        data = packed_input.data
         
+        processed_features = []
+        embedded_features = []
+        
+        # Обработка числовых признаков
+        if self.num_numerical_features > 0:
+            numerical_data = data[:, :self.num_numerical_features]
+            # BatchNorm1d ожидает размерность (N, C), где C — количество признаков
+            numerical_normalized = self.numerical_bn(numerical_data)
+            processed_features.append(numerical_normalized)
+        
+        # Обработка категориальных признаков
+        cat_start_idx = self.num_numerical_features
+        for i, embedding_layer in enumerate(self.categorical_embeddings):
+            # Извлечение колонки соответствующего категориального признака
+            cat_indices = data[:, cat_start_idx + i].long()
+            # Применение эмбеддинга
+            cat_embedded = embedding_layer(cat_indices)
+            embedded_features.append(cat_embedded)
+
+        combined_embeddings = torch.cat(embedded_features, dim=1)
+        combined_embeddings = self.linear(combined_embeddings)
+
+        processed_features.append(combined_embeddings)
+        
+        # Конкатенация всех обработанных признаков
+        combined_input = torch.cat(processed_features, dim=1)
+        
+        # Формирование обновленной PackedSequence
+        lstm_input = packed_input._replace(data=combined_input)
+        
+        # Прямой проход через LSTM
+        # LSTM автоматически обрабатывает упакованную последовательность
+        _, (h_n, _) = self.lstm(lstm_input)
+        
+        # Возврат скрытого состояния последнего слоя
         return h_n[-1, :, :]
-    
-    def get_encoded_vector(self, packed_input: PackedSequence) -> torch.Tensor:
-        """
-        Вспомогательный метод для получения единого векторного представления последовательности.
-        
-        Извлекает финальное скрытое состояние из последнего слоя и удаляет размерность слоя,
-        возвращая тензор размерности (batch, hidden_size).
-        
-        :param packed_input: Упакованная последовательность входных данных.
-        :type packed_input: PackedSequence
-        
-        :return: Тензор кодированных представлений для каждого элемента в батче.
-        :rtype: torch.Tensor
-        """
-        h_n, _ = self.forward(packed_input)
-        
-        # h_n имеет размерность (num_layers, batch, hidden_size)
-        # Для однослойной модели выбираем последний слой (индекс -1 или 0)
-        encoded_vector = h_n[-1, :, :]
-        
-        return encoded_vector
+

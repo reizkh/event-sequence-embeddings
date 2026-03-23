@@ -37,7 +37,7 @@ class LGBMWithEarlyStopping(lgb.LGBMClassifier):
 def train_encoder(
     train_dataset: ClientTransactionsDataset,
     val_dataset: ClientTransactionsDataset,
-    vocab_size: int,
+    vocab_sizes: List[int],
     hyperparams: Dict[str, Any],
     mlflow_run: Any,
     checkpoint_path: str = "model_checkpoint.pth"
@@ -45,8 +45,8 @@ def train_encoder(
     device = "cuda" if torch.cuda.is_available() else "cpu"
     
     encoder = LSTMEncoder(
-        vocab_size=vocab_size,
-        embedding_size=hyperparams["category_embedding_size"], 
+        cat_vocab_sizes=vocab_sizes,
+        cat_embedding_dims=[hyperparams["category_embedding_size"]] * len(vocab_sizes), 
         hidden_size=hyperparams["embedding_size"]
     ).to(device)
 
@@ -146,8 +146,8 @@ def train_encoder(
         artifact_path="models/best_model/" + checkpoint_path
     )
     best_encoder = LSTMEncoder(
-        vocab_size=hyperparams["vocab_size"], 
-        embedding_size=hyperparams["category_embedding_size"], 
+        cat_vocab_sizes=vocab_sizes,
+        cat_embedding_dims=[hyperparams["category_embedding_size"]] * len(vocab_sizes), 
         hidden_size=hyperparams["embedding_size"]
     ).to(device)
     best_encoder.load_state_dict(torch.load(path, map_location=device))
