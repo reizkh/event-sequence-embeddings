@@ -14,6 +14,7 @@ from sklearn.linear_model import LogisticRegression
 from sklearn.model_selection import RandomizedSearchCV, train_test_split
 from sklearn.base import BaseEstimator
 import lightgbm as lgb
+from catboost import CatBoostClassifier
 from scipy.stats import uniform, randint
 
 
@@ -170,6 +171,11 @@ def run_classifier_cv(
             n_jobs=-1,
             verbose=-1
         )
+    elif hyperparams["classifier"] == "catboost":
+        model = CatBoostClassifier(
+            verbose=0,
+            task_type="GPU" if torch.cuda.is_available() else "CPU"
+        )
 
     rs = RandomizedSearchCV(
         estimator=model, # type: ignore
@@ -178,7 +184,7 @@ def run_classifier_cv(
         scoring="roc_auc",
         cv=5,
         verbose=3,
-        n_jobs=-1,
+        n_jobs=-1 if hyperparams["classifier"] != "catboost" else 1,
     )
     rs.fit(cv_vector_dataset, cv_labels)
 
