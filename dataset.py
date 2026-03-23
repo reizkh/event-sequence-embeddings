@@ -75,7 +75,7 @@ class ClientTransactionsDataset(Dataset):
             
             # Обработка числовых признаков (amount)
             # Приведение к тензору и добавление размерности [N, 1]
-            amounts = torch.tensor(group['amount'].values, dtype=torch.float32).unsqueeze(1)
+            log_amounts = torch.log(torch.tensor(group['amount'].values, dtype=torch.float32).unsqueeze(1))
             
             # Обработка категориальных признаков
             cat_tensors = []
@@ -88,9 +88,9 @@ class ClientTransactionsDataset(Dataset):
             # Конкатенация признаков: [amount, cat_col_1, cat_col_2, ...]
             # Итоговая размерность последовательности: [N, 1 + len(cat_cols)]
             if cat_tensors:
-                features = torch.cat([amounts] + cat_tensors, dim=1)
+                features = torch.cat([log_amounts] + cat_tensors, dim=1)
             else:
-                features = amounts
+                features = log_amounts
             
             self.transactions.append(features)
             
