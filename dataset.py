@@ -253,7 +253,7 @@ def load_and_split_data(
     labeled_dataset_path: str,
     unlabeled_dataset_path: str,
     test_size: float = 0.15,
-    val_ratio: float = 0.7,
+    val_size: float = 0.15,
     random_state: Optional[int] = 0,
     cat_features: List = ["MCC"],
     cat_coverage: float = 0.9
@@ -279,7 +279,7 @@ def load_and_split_data(
         labeled_clients, test_size=test_size, random_state=random_state
     )
     enc_train_clients_B, val_clients = train_test_split(
-        crossval_clients, test_size=(1 - val_ratio) * test_size, random_state=random_state
+        crossval_clients, test_size=val_size / (1 - test_size), random_state=random_state
     )
     
     enc_train_clients = np.concatenate([enc_train_clients_A, enc_train_clients_B])
