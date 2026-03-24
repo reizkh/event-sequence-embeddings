@@ -161,7 +161,8 @@ def run_classifier_cv(
     cv_vector_dataset: np.ndarray,
     cv_labels: List,
     hyperparams: Dict[str, Any],
-    clf_hyperparams: Dict[str, Any]
+    clf_hyperparams: Dict[str, Any],
+    n_iter: int = 15
 ) -> BaseEstimator:
     param_distributions = clf_hyperparams[hyperparams["classifier"]]
 
@@ -182,7 +183,7 @@ def run_classifier_cv(
     rs = RandomizedSearchCV(
         estimator=model, # type: ignore
         param_distributions=param_distributions,
-        n_iter=30,
+        n_iter=n_iter,
         scoring="roc_auc",
         cv=5,
         verbose=3,

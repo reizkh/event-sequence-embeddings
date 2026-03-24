@@ -254,7 +254,7 @@ def load_and_split_data(
     unlabeled_dataset_path: str,
     test_size: float = 0.15,
     val_ratio: float = 0.7,
-    random_state: int = 0,
+    random_state: Optional[int] = 0,
     cat_features: List = ["MCC"],
     cat_coverage: float = 0.9
 ) -> Tuple[ClientTransactionsDataset, ClientTransactionsDataset, ClientTransactionsDataset, ClientTransactionsDataset, List]:
