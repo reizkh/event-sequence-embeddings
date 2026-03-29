@@ -65,13 +65,15 @@ class LSTMEncoder(nn.Module):
         ])
         
         total_embedding_dim = sum(cat_embedding_dims)
-        input_size = num_numerical_features + hidden_size
+        self.input_size = num_numerical_features + hidden_size
         
         self.linear = nn.Linear(in_features=total_embedding_dim, out_features=hidden_size)
+
+        self.sep_vector = nn.Parameter(torch.zeros([self.input_size]))
         
         # Инициализация LSTM слоя
         self.lstm = nn.LSTM(
-            input_size=input_size,
+            input_size=self.input_size,
             hidden_size=hidden_size,
             num_layers=1,
             batch_first=batch_first,
@@ -95,13 +97,18 @@ class LSTMEncoder(nn.Module):
         :return: Финальное скрытое состояние размера ``[batch_size, hidden_size]``.
         """
         data = packed_input.data
-        
+        device = data.device
+        combined_input = torch.zeros([data.shape[0], self.input_size], device=device)
+
+        sep_idx = data[:,-1] == 1
+        real_data = data[~sep_idx] # Данные с флагом is_sep обрабатываются независимо от остальных
+
         processed_features = []
         embedded_features = []
         
         # Обработка числовых признаков
         if self.num_numerical_features > 0:
-            numerical_data = data[:, :self.num_numerical_features]
+            numerical_data = real_data[:, :self.num_numerical_features]
             # BatchNorm1d ожидает размерность (N, C), где C — количество признаков
             numerical_normalized = self.numerical_bn(numerical_data)
             processed_features.append(numerical_normalized)
@@ -110,7 +117,7 @@ class LSTMEncoder(nn.Module):
         cat_start_idx = self.num_numerical_features
         for i, embedding_layer in enumerate(self.categorical_embeddings):
             # Извлечение колонки соответствующего категориального признака
-            cat_indices = data[:, cat_start_idx + i].long()
+            cat_indices = real_data[:, cat_start_idx + i].long()
             # Применение эмбеддинга
             cat_embedded = embedding_layer(cat_indices)
             embedded_features.append(cat_embedded)
@@ -121,7 +128,8 @@ class LSTMEncoder(nn.Module):
         processed_features.append(combined_embeddings)
         
         # Конкатенация всех обработанных признаков
-        combined_input = torch.cat(processed_features, dim=1)
+        combined_input[~sep_idx] = torch.cat(processed_features, dim=1)
+        combined_input[sep_idx] = self.sep_vector
         
         # Формирование обновленной PackedSequence
         lstm_input = packed_input._replace(data=combined_input)

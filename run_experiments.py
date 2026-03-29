@@ -10,7 +10,7 @@ from tqdm.auto import tqdm
 from scipy.stats import randint, uniform
 
 
-cat_coverage = 0.95
+cat_coverage = 0.99
 cat_features = ["MCC", "trx_category"]
 enc_train_dataset, enc_val_dataset, classifier_cv_dataset, test_dataset, vocab_sizes = load_and_split_data(
     "pytorch-lifestream/rosbank-churn", 
@@ -22,14 +22,14 @@ enc_train_dataset, enc_val_dataset, classifier_cv_dataset, test_dataset, vocab_s
 hyperparams_distributions = {
     "embedding_size": [128],
     "category_embedding_size": [128],
-    "num_epochs": [15, 30, 60],
-    "margin": linspace(0.1, 2.0),
-    "learning_rate": linspace(1e-3, 1e-2),
+    "num_epochs": [80],
+    "margin": [0.5],
+    "learning_rate": logspace(-5, -3),
     "weight_decay": logspace(-6, -4),
-    "n_samples_in_batch": [64, 128, 256],
-    "subseq_min": [5, 10, 15, 20, 25, 30],
-    "subseq_max": [100, 125, 150, 175, 200, 250],
-    "k": [3, 4, 5, 6],
+    "n_samples_in_batch": [64],
+    "subseq_min": [15],
+    "subseq_max": [150],
+    "k": [5],
     "cat_features": [cat_features],
     "cat_coverage": [cat_coverage],
     "classifier": ["logistic_regression"],
@@ -63,7 +63,7 @@ clf_hyperparams = {
 
 sampler = ParameterSampler(
     param_distributions=hyperparams_distributions,
-    n_iter=15
+    n_iter=25
 )
 
 device = "cuda" if torch.cuda.is_available() else "cpu"

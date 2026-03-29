@@ -12,7 +12,7 @@ from sklearn.metrics import roc_auc_score
 hyperparams = {
     "embedding_size": 128,
     "category_embedding_size": 128,
-    "num_epochs": 60,
+    "num_epochs": 80,
     "margin": 0.5,
     "learning_rate": 6e-4,
     "weight_decay": 5e-6,
@@ -91,7 +91,7 @@ for _ in range(rounds):
             device
         )
 
-        y_pred = clf.predict_proba(test_vector_dataset) # type: ignore
+        y_pred = clf.predict_proba(test_vector_dataset)[:,1] # type: ignore
         roc_auc = roc_auc_score(test_labels, y_pred)
         mlflow.log_metric("test_roc_auc", float(roc_auc))
 

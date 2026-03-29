@@ -29,7 +29,8 @@ class ClientTransactionsDataset(Dataset):
     def __init__(
         self, 
         df: pd.DataFrame, 
-        cat_cols: List[str], 
+        cat_cols: List[str],
+        sep_events: bool = True
     ):
         """
         Инициализация датасета и предварительная обработка данных.
@@ -70,9 +71,7 @@ class ClientTransactionsDataset(Dataset):
         
         for cl_id, group in grouped:
             self.cl_ids.append(cl_id) # type: ignore
-            # Сортировка транзакций по времени внутри группы
-            group = group.sort_values("TRDATETIME")
-            
+
             # Обработка числовых признаков (amount)
             # Приведение к тензору и добавление размерности [N, 1]
             log_amounts = torch.log(torch.tensor(group['amount'].values, dtype=torch.float32).unsqueeze(1))
@@ -84,6 +83,9 @@ class ClientTransactionsDataset(Dataset):
                 indices = [self.cat_vocabularies[col][m] for m in group[col]]
                 cat_tensor = torch.tensor(indices, dtype=torch.long).unsqueeze(1)
                 cat_tensors.append(cat_tensor)
+            
+            if sep_events:
+                cat_tensors.append(torch.tensor(group["is_sep"].to_numpy()).unsqueeze(1))
                         
             # Конкатенация признаков: [amount, cat_col_1, cat_col_2, ...]
             # Итоговая размерность последовательности: [N, 1 + len(cat_cols)]
@@ -249,6 +251,43 @@ def create_vector_dataset(model: torch.nn.Module, dataset: ClientTransactionsDat
         vector_dataset = np.concat([vector_dataset, model(packed_inputs).detach().cpu().numpy()])
     return vector_dataset, labels
 
+def add_sep_events(
+    df: pd.DataFrame,
+    cl_id_column: str = "cl_id",
+    date_column: str = "date",
+    is_sep_column: str = "is_sep"
+):
+    df = df.copy()
+    df[is_sep_column] = False
+    sep_rows = {
+        cl_id_column: [],
+        date_column: [],
+    }
+        
+    grouped = df.groupby(cl_id_column, sort=False)
+    for cl_id, group in grouped:
+        group = group.sort_values(date_column).reset_index(drop=True)
+        
+        begin = group[date_column].min()
+        end = group[date_column].max()
+        x = begin
+        while x < end:
+            sep_rows[cl_id_column].append(cl_id)
+            sep_rows[date_column].append(x)
+            x += pd.Timedelta("1d")
+    
+    df_separators = pd.DataFrame(sep_rows)
+    df_separators[is_sep_column] = True
+    df_separators["amount"] = 1.0
+    for col in df.columns:
+        if col not in df_separators.columns:
+            df_separators[col] = "rare"
+    df_result = pd.concat([df, df_separators], ignore_index=True)
+    
+    df_result = df_result.sort_values([cl_id_column, date_column, is_sep_column]).reset_index(drop=True)
+    
+    return df_result
+
 def load_and_split_data(
     labeled_dataset_path: str,
     unlabeled_dataset_path: str,
@@ -292,6 +331,10 @@ def load_and_split_data(
         vocab_sizes.append(len(most_frequent_values) + 1)
         
         full_df[cat_feature] = full_df[cat_feature].astype(str).where(full_df[cat_feature].isin(most_frequent_values), "rare")
+
+    full_df['TRDATETIME'] = pd.to_datetime(full_df['TRDATETIME'], format="%d%b%y:%X")
+    full_df["date"] = full_df["TRDATETIME"].dt.date
+    full_df = add_sep_events(full_df)
 
     enc_train_df = full_df[full_df["cl_id"].isin(enc_train_clients)]
     enc_val_df = full_df[full_df["cl_id"].isin(val_clients)]
