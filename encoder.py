@@ -53,7 +53,7 @@ class LSTMEncoder(nn.Module):
         else:
             self.numerical_bn = nn.Identity()
 
-        intermediate_dim = num_numerical_features + sum(cat_vocab_sizes)
+        intermediate_dim = num_numerical_features + sum(cat_vocab_sizes) + 1
         self.linear = nn.Linear(in_features=intermediate_dim, out_features=hidden_size)
 
         self.sep_vector = nn.Parameter(torch.zeros([self.hidden_size]))
@@ -86,34 +86,29 @@ class LSTMEncoder(nn.Module):
         data = packed_input.data
         combined_input = torch.zeros([data.shape[0], self.hidden_size], device=data.device)
 
-        sep_idx = data[:,-1] == 1
-        real_data = data[~sep_idx] # Данные с флагом is_sep обрабатываются независимо от остальных
-
         processed_features = []
         
         # Обработка числовых признаков
         if self.num_numerical_features > 0:
-            numerical_data = real_data[:, :self.num_numerical_features]
+            numerical_data = data[:, :self.num_numerical_features]
             numerical_normalized = self.numerical_bn(numerical_data)
             processed_features.append(numerical_normalized)
         
         # Обработка категориальных признаков
         cat_start_idx = self.num_numerical_features
         for i, num_classes in enumerate(self.cat_vocab_sizes):
-            cat_indices = real_data[:, cat_start_idx + i].long()
+            cat_indices = data[:, cat_start_idx + i].long()
             # Применение OHE
             encoded_category = F.one_hot(cat_indices, num_classes)
             processed_features.append(encoded_category)
+        
+        processed_features.append(data[:, -1:])
 
         intermediate_embedding = torch.cat(processed_features, dim=1)
         event_embeddings = self.linear(intermediate_embedding)
         
-        # Конкатенация всех обработанных признаков
-        combined_input[~sep_idx] = event_embeddings
-        combined_input[sep_idx] = self.sep_vector
-        
         # Формирование обновленной PackedSequence
-        lstm_input = packed_input._replace(data=combined_input)
+        lstm_input = packed_input._replace(data=event_embeddings)
         
         # Прямой проход через LSTM
         # LSTM автоматически обрабатывает упакованную последовательность
