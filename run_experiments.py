@@ -10,7 +10,7 @@ from tqdm.auto import tqdm
 from scipy.stats import randint, uniform
 
 
-cat_coverage = 0.95
+cat_coverage = 0.99
 cat_features = ["MCC", "trx_category"]
 enc_train_dataset, enc_val_dataset, classifier_cv_dataset, test_dataset, vocab_sizes = load_and_split_data(
     "pytorch-lifestream/rosbank-churn", 
@@ -22,17 +22,17 @@ enc_train_dataset, enc_val_dataset, classifier_cv_dataset, test_dataset, vocab_s
 hyperparams_distributions = {
     "embedding_size": [128],
     "category_embedding_size": [128],
-    "num_epochs": [15, 30, 60],
-    "margin": linspace(0.1, 2.0),
-    "learning_rate": linspace(1e-3, 1e-2),
-    "weight_decay": logspace(-6, -4),
-    "n_samples_in_batch": [64, 128, 256],
-    "subseq_min": [5, 10, 15, 20, 25, 30],
-    "subseq_max": [100, 125, 150, 175, 200, 250],
-    "k": [3, 4, 5, 6],
+    "num_epochs": [80],
+    "margin": [0.5],
+    "learning_rate": linspace(1e-4, 1e-3, 10),
+    "weight_decay": [2e-5, 5e-5, 1e-4],
+    "n_samples_in_batch": [64],
+    "subseq_min": [15],
+    "subseq_max": [150],
+    "k": [5],
     "cat_features": [cat_features],
     "cat_coverage": [cat_coverage],
-    "classifier": ["logistic_regression"],
+    "classifier": ["catboost"],
     "optimizer": ["Adam"]
 }
 
@@ -51,26 +51,18 @@ clf_hyperparams = {
         "reg_alpha": uniform(0, 1),
         "reg_lambda": uniform(0, 1)
     },
-    "catboost": {
-        "depth": randint(3, 10),
-        "learning_rate": logspace(-3, -1),
-        "l2_leaf_reg": randint(1, 100),
-        "bagging_temperature": uniform(0, 10),
-        "random_strength": uniform(0, 10),
-        "border_count": randint(32, 255)
-    }
+    "catboost": {}
 }
 
 sampler = ParameterSampler(
     param_distributions=hyperparams_distributions,
-    n_iter=15
+    n_iter=30
 )
 
 device = "cuda" if torch.cuda.is_available() else "cpu"
 
 dagshub.init("event-sequence-embeddings", "reizkh")
-# mlflow.config.enable_async_logging()
-# mlflow.set_experiment("Using multiple features")
+mlflow.set_experiment("CoLES Grid search 2")
 for hyperparams in tqdm(sampler, desc="Random search of hyperparameters", leave=False):
     with mlflow.start_run() as run:
         mlflow.log_params(hyperparams)
