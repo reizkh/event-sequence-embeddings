@@ -1,9 +1,10 @@
 from dataset import ClientTransactionsDataset, random_slices_collate_fn, create_vector_dataset
 from encoder import LSTMEncoder
-from loss import contrastive_loss_euclidean
+from loss import soft_contrastive_loss_euclidean
 
 import torch
 from torch import nn
+import torch.nn.functional as F
 from typing import Dict, Any, List
 import numpy as np
 import mlflow
@@ -40,8 +41,11 @@ def train_encoder(
     vocab_sizes: List[int],
     hyperparams: Dict[str, Any],
     mlflow_run: Any,
+    dataset_embeddings: torch.Tensor,
     checkpoint_path: str = "model_checkpoint.pth"
 ) -> LSTMEncoder:
+    dataset_embeddings = F.normalize(dataset_embeddings)
+
     device = "cuda" if torch.cuda.is_available() else "cpu"
     
     encoder = LSTMEncoder(
@@ -101,7 +105,14 @@ def train_encoder(
             ).to(device)
             
             embeddings = encoder(packed_inputs)
-            loss = contrastive_loss_euclidean(ids, embeddings, margin=hyperparams["margin"])
+            loss = soft_contrastive_loss_euclidean(
+                ids,
+                embeddings,
+                dataset_embeddings,
+                hyperparams["margin"],
+                hyperparams["alpha"],
+                hyperparams["threshold"]
+            )
             loss.backward()
             
             loss_value = loss.item()
@@ -124,7 +135,14 @@ def train_encoder(
                     transactions, lengths=lengths, batch_first=True, enforce_sorted=False
                 ).to(device)
                 embeddings = encoder(packed_inputs)
-                loss = contrastive_loss_euclidean(ids, embeddings, margin=hyperparams["margin"])
+                loss = soft_contrastive_loss_euclidean(
+                    ids,
+                    embeddings,
+                    dataset_embeddings,
+                    hyperparams["margin"],
+                    hyperparams["alpha"],
+                    hyperparams["threshold"]
+                )
                 total_val_loss += loss.item()
 
         avg_val_loss = total_val_loss / len(val_loader)

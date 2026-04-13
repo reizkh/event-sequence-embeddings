@@ -116,19 +116,19 @@ class ClientTransactionsDataset(Dataset):
         :returns:
         Кортеж ``(cl_id, features, label)`` содержащий:
 
-        * ``cl_id`` — идентификатор клиента.
+        * ``idx`` — индекс.
         * ``features`` — тензор размера ``[N_transactions, 1 + len(cat_cols)]``.
         * ``label`` — целевая метка (или None, если отсутствует).
         """
         if idx >= len(self):
             raise IndexError(f"Индекс {idx} выходит за границы датасета (размер: {len(self)})")
             
-        cl_id = self.cl_ids[idx]
+        # cl_id = self.cl_ids[idx]
         features = self.transactions[idx]
 
         if self.label:
-            return cl_id, features, self.labels[idx]
-        return cl_id, features, None
+            return idx, features, self.labels[idx]
+        return idx, features, None
     
 def random_slices_collate_fn(
     batch: List[Tuple[Any, torch.Tensor, Any]], 
