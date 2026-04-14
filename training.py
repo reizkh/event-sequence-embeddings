@@ -44,6 +44,7 @@ def train_encoder(
     dataset_embeddings: torch.Tensor,
     checkpoint_path: str = "model_checkpoint.pth"
 ) -> LSTMEncoder:
+    dataset_embeddings -= dataset_embeddings.mean(dim=0)
     dataset_embeddings = F.normalize(dataset_embeddings)
 
     device = "cuda" if torch.cuda.is_available() else "cpu"

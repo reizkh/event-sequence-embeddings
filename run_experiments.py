@@ -9,6 +9,10 @@ from sklearn.model_selection import ParameterSampler
 from numpy import logspace, linspace
 from tqdm.auto import tqdm
 from scipy.stats import randint, uniform
+import dotenv
+
+
+dotenv.load_dotenv(".env")
 
 
 cat_coverage = 0.99
@@ -25,8 +29,8 @@ hyperparams_distributions = {
     "category_embedding_size": [128],
     "num_epochs": [80],
     "margin": [0.5],
-    "alpha": logspace(-2, 0, 6),
-    "threshold": linspace(0.5, 1.0, 5),
+    "alpha": logspace(-2, 0, 4),
+    "threshold": linspace(0.5, 0.9, 9),
     "learning_rate": [9e-4],
     "weight_decay": [2e-5],
     "n_samples_in_batch": [64],
@@ -89,7 +93,7 @@ with mlflow.start_run(run_id=run_id) as mlflow_run:
     )
 
 # mlflow.config.enable_async_logging()
-mlflow.set_experiment("CoLES with soft labels")
+mlflow.set_experiment("CoLES with soft labels (centered)")
 for hyperparams in tqdm(sampler, desc="Random search of hyperparameters", leave=False):
     with mlflow.start_run() as run:
         mlflow.log_params(hyperparams)
