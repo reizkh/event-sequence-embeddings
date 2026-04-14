@@ -3,6 +3,7 @@ from training import train_encoder, run_classifier_cv
 from encoder import LSTMEncoder
 
 import mlflow
+import mlflow.artifacts
 import dagshub
 import torch
 from sklearn.model_selection import ParameterSampler
