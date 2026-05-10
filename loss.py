@@ -22,3 +22,18 @@ def contrastive_loss_euclidean(
     negative_term = torch.sum(negative_mask * torch.clamp(margin - distances, min=0.0)**2)
 
     return 0.5 * (positive_term + negative_term)
+
+def softmax_loss(
+    queries: torch.Tensor,
+    targets: torch.Tensor,
+    neg_samples: int = 15
+):
+    weights = 1.0 - torch.eye(targets.shape[0], device=queries.device)
+    neg_indices = torch.multinomial(weights, neg_samples)
+
+    neg_vectors = queries[neg_indices]
+
+    pos = torch.exp((queries * targets).sum(-1))
+    neg = torch.exp(torch.einsum("nmd,nd->nm", neg_vectors, queries)).sum(-1)
+
+    return -torch.log((pos / (pos + neg)).sum())

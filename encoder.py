@@ -2,7 +2,7 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 from torch.nn.utils.rnn import PackedSequence
-from typing import List
+from typing import List, Dict, Any
 
 class LSTMEncoder(nn.Module):
     """
@@ -27,7 +27,10 @@ class LSTMEncoder(nn.Module):
         cat_vocab_sizes: List[int],
         hidden_size: int, 
         batch_first: bool = True,
-        num_numerical_features: int = 1
+        num_numerical_features: int = 1,
+        mask_pr: float = 0.02,
+        club_pr: float = 0.02,
+        sep_tokens: bool = False
     ):
         """
         Инициализация компонентов модели.
@@ -46,6 +49,9 @@ class LSTMEncoder(nn.Module):
         self.cat_vocab_sizes = cat_vocab_sizes
         self.hidden_size = hidden_size
         self.batch_first = batch_first
+        self.mask_pr = mask_pr
+        self.club_pr = club_pr
+        self.sep_tokens = sep_tokens
 
         # Инициализация нормализации для числовых признаков
         if num_numerical_features > 0:
@@ -53,10 +59,17 @@ class LSTMEncoder(nn.Module):
         else:
             self.numerical_bn = nn.Identity()
 
-        intermediate_dim = num_numerical_features + sum(cat_vocab_sizes) + 1
+        intermediate_dim = num_numerical_features + sum(cat_vocab_sizes)
         self.linear = nn.Linear(in_features=intermediate_dim, out_features=hidden_size)
 
-        self.sep_vector = nn.Parameter(torch.zeros([self.hidden_size]))
+        self.global_proj = nn.Linear(in_features=hidden_size, out_features=hidden_size)
+        self.local_proj = nn.Linear(in_features=hidden_size, out_features=hidden_size)
+
+        self.sep_vector = nn.Parameter(torch.empty([self.hidden_size]))
+        self.mask_vector = nn.Parameter(torch.empty([self.hidden_size]))
+
+        torch.nn.init.normal_(self.sep_vector, std=1/self.hidden_size**0.5)
+        torch.nn.init.normal_(self.mask_vector, std=1/self.hidden_size**0.5)
         
         # Инициализация LSTM слоя
         self.lstm = nn.LSTM(
@@ -66,26 +79,8 @@ class LSTMEncoder(nn.Module):
             batch_first=batch_first,
             bidirectional=False
         )
-        
-    def forward(self, packed_input: PackedSequence) -> torch.Tensor:
-        """
-        Прямой проход через энкодер.
-        
-        Осуществляет разделение входных данных на числовые и категориальные части,
-        применяет соответствующие преобразования (нормализация, эмбеддинг) и передает
-        результат в LSTM.
 
-        :param PackedSequence packed_input: Упакованная последовательность входных данных. 
-                                            Данные должны иметь структуру [TotalSteps, TotalFeatures],
-                                            где первые колонки — числовые признаки, последующие — 
-                                            индексы категориальных признаков.
-        
-        :rtype: torch.Tensor
-        :return: Финальное скрытое состояние размера ``[batch_size, hidden_size]``.
-        """
-        data = packed_input.data
-        combined_input = torch.zeros([data.shape[0], self.hidden_size], device=data.device)
-
+    def embed_events(self, data: torch.Tensor) -> torch.Tensor:
         processed_features = []
         
         # Обработка числовых признаков
@@ -101,19 +96,54 @@ class LSTMEncoder(nn.Module):
             # Применение OHE
             encoded_category = F.one_hot(cat_indices, num_classes)
             processed_features.append(encoded_category)
-        
-        processed_features.append(data[:, -1:])
 
         intermediate_embedding = torch.cat(processed_features, dim=1)
         event_embeddings = self.linear(intermediate_embedding)
-        
-        # Формирование обновленной PackedSequence
-        lstm_input = packed_input._replace(data=event_embeddings)
-        
-        # Прямой проход через LSTM
-        # LSTM автоматически обрабатывает упакованную последовательность
-        _, (h_n, _) = self.lstm(lstm_input)
-        
-        # Возврат скрытого состояния последнего слоя
-        return h_n[-1, :, :]
+        return event_embeddings
 
+    def apply_special_tokens(self, data: torch.Tensor, sep_idx: torch.Tensor, mask_idx: torch.Tensor) -> torch.Tensor:
+        data = torch.where(sep_idx.unsqueeze(1), self.sep_vector.unsqueeze(0), data)
+        data = torch.where(mask_idx.unsqueeze(1), self.mask_vector.unsqueeze(0), data)
+        return data
+        
+    def forward(self, packed_input: PackedSequence) -> Dict[Any, torch.Tensor]:
+        data = packed_input.data
+
+        event_embeddings = self.embed_events(data)
+
+        sep_idx = data[:, -1].bool()
+        if not self.sep_tokens:
+            sep_idx = torch.zeros_like(sep_idx)
+        mask_idx = torch.rand(data.shape[0], device=data.device) < self.mask_pr
+        masked_event_embeddings = self.apply_special_tokens(event_embeddings, sep_idx, mask_idx)
+        
+        lstm_input = packed_input._replace(data=masked_event_embeddings)
+        h_t, (h_n, _) = self.lstm(lstm_input)
+        h_t = h_t.data
+        
+        coles_vectors = self.global_proj(h_n[-1])
+        cmlm_queries = self.local_proj(h_t[mask_idx])
+        cmlm_targets = event_embeddings[mask_idx]
+
+        rand_idx = torch.rand(data.shape[0], device=data.device) < self.club_pr
+        club_z1 = self.global_proj(h_t[rand_idx])
+        club_z2 = self.local_proj(h_t[rand_idx])
+
+        return {
+            "coles_vectors": coles_vectors,
+            "cmlm_queries": cmlm_queries,
+            "cmlm_targets": cmlm_targets,
+            "club_z1": club_z1,
+            "club_z2": club_z2
+        }
+
+    def local_embed(self, data: torch.Tensor) -> torch.Tensor:
+        event_embeddings = self.embed_events(data)
+        _, (h_n, _) = self.lstm(event_embeddings)
+        return self.local_proj(h_n[-1])
+    
+    def global_embed(self, packed_input: PackedSequence) -> torch.Tensor:
+        data = packed_input.data
+        event_embeddings = self.embed_events(data)
+        _, (h_n, _) = self.lstm(packed_input._replace(data=event_embeddings))
+        return self.global_proj(h_n[-1])

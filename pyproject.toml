@@ -1,5 +1,5 @@
-[tool.uv]
-index-url = "https://pypi.tuna.tsinghua.edu.cn/simple"
+#[tool.uv]
+#index-url = "https://pypi.tuna.tsinghua.edu.cn/simple"
 
 [project]
 name = "ashdagasd"

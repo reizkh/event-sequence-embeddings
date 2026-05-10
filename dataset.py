@@ -1,8 +1,11 @@
+from encoder import LSTMEncoder
+
+
 import torch
 from torch import nn
 import pandas as pd
 import torch.nn.functional as F
-from torch.utils.data import Dataset
+from torch.utils.data import Dataset, DataLoader
 from typing import List, Tuple, Union, Dict, Any, Optional
 import random
 import numpy as np
@@ -216,41 +219,6 @@ def random_slices_collate_fn(
     
     return cl_ids, padded_subsequences, lengths
 
-def create_vector_dataset(model: torch.nn.Module, dataset: ClientTransactionsDataset, embedding_size: int, device) -> Tuple[np.ndarray, List]:
-    """
-    Кодирует набор данных транзакций в векторные представления с использованием предоставленной модели.
-
-    :param model: Модуль нейронной сети, используемый для кодирования транзакций.
-    :type model: torch.nn.Module
-    :param data: Набор данных, содержащий транзакции клиентов и соответствующие метки.
-    :type data: ClientTransactionsDataset
-    :param embedding_size: Размерность выходных векторов эмбеддингов.
-    :type embedding_size: int
-    :return: Кортеж, содержащий матрицу кодированных векторов и список меток.
-    :rtype: Tuple[np.ndarray, list]
-    """
-    model.eval()
-    vector_dataset = np.empty(shape=[0, embedding_size])
-    labels = dataset.labels
-
-    dataloader = torch.utils.data.DataLoader(
-        dataset,
-        shuffle=False,
-        batch_size=64,
-        collate_fn=lambda batch: random_slices_collate_fn(batch, 10000, 10000, 1),
-        drop_last=False
-    )
-    pbar = tqdm(dataloader, desc="Creating vector dataset")
-    for ids, transactions, lengths in pbar:
-        packed_inputs = nn.utils.rnn.pack_padded_sequence(
-            transactions,
-            lengths=lengths,
-            batch_first=True,
-            enforce_sorted=False
-        ).to(device)
-        vector_dataset = np.concat([vector_dataset, model(packed_inputs).detach().cpu().numpy()])
-    return vector_dataset, labels
-
 def add_sep_events(
     df: pd.DataFrame,
     cl_id_column: str = "cl_id",
@@ -295,7 +263,8 @@ def load_and_split_data(
     val_size: float = 0.15,
     random_state: Optional[int] = 0,
     cat_features: List = ["MCC"],
-    cat_coverage: float = 0.9
+    cat_coverage: float = 0.9,
+    add_sep: bool = False
 ) -> Tuple[ClientTransactionsDataset, ClientTransactionsDataset, ClientTransactionsDataset, ClientTransactionsDataset, List]:
     """
     Загружает датасеты, объединяет размеченные и неразмеченные данные,
@@ -334,7 +303,9 @@ def load_and_split_data(
 
     full_df['TRDATETIME'] = pd.to_datetime(full_df['TRDATETIME'], format="%d%b%y:%X")
     full_df["date"] = full_df["TRDATETIME"].dt.date
-    full_df = add_sep_events(full_df)
+
+    if add_sep:
+        full_df = add_sep_events(full_df)
 
     enc_train_df = full_df[full_df["cl_id"].isin(enc_train_clients)]
     enc_val_df = full_df[full_df["cl_id"].isin(val_clients)]
@@ -342,9 +313,77 @@ def load_and_split_data(
     test_df = full_df[full_df["cl_id"].isin(test_clients)]
 
     return (
-        ClientTransactionsDataset(enc_train_df, cat_features),
-        ClientTransactionsDataset(enc_val_df, cat_features),
-        ClientTransactionsDataset(crossval_df, cat_features),
-        ClientTransactionsDataset(test_df, cat_features),
+        ClientTransactionsDataset(enc_train_df, cat_features, sep_events=add_sep),
+        ClientTransactionsDataset(enc_val_df, cat_features, sep_events=add_sep),
+        ClientTransactionsDataset(crossval_df, cat_features, sep_events=add_sep),
+        ClientTransactionsDataset(test_df, cat_features, sep_events=add_sep),
         vocab_sizes
     )
+
+@torch.no_grad()
+def create_global_dataset(
+    model: LSTMEncoder,
+    dataset: ClientTransactionsDataset, 
+    device
+) -> Tuple[np.ndarray, np.ndarray]:
+    model.eval()
+    vector_dataset = []
+    labels = np.array(dataset.labels, dtype=np.long)
+
+    dataloader = DataLoader(
+        dataset,
+        shuffle=False,
+        batch_size=64,
+        collate_fn=lambda batch: random_slices_collate_fn(batch, 10000, 10000, 1),
+        drop_last=False
+    )
+    pbar = tqdm(dataloader, desc="Creating vector dataset")
+    for ids, transactions, lengths in pbar:
+        packed_inputs = nn.utils.rnn.pack_padded_sequence(
+            transactions,
+            lengths=lengths,
+            batch_first=True,
+            enforce_sorted=False
+        ).to(device)
+        vector_dataset.append(model.global_embed(packed_inputs).detach().cpu().numpy())
+    vector_dataset = np.concat(vector_dataset)
+    return vector_dataset, labels
+
+@torch.no_grad()
+def create_local_dataset(
+    enc: LSTMEncoder,
+    data: ClientTransactionsDataset,
+    device,
+    window_len: int = 32,
+    window_stride: int = 32,
+    sep_events: bool = False
+):
+    enc.eval()
+    x = []
+    targets = []
+    dl = DataLoader(
+        data,
+        shuffle=False
+    )
+    for _, seq, _ in tqdm(dl): # type: ignore
+        seq = seq[0].to(device)
+
+        if sep_events:
+            normal_mask = seq[:, -1] == 0
+        else:
+            normal_mask = torch.ones_like(seq[:, -1])
+        real_events = torch.where(normal_mask)[0]
+
+        for idx in range(0, real_events.shape[0] - window_len, window_stride):
+            i = real_events[idx]
+            j = real_events[idx + window_len]
+
+            target_log_amount = seq[j, 0]
+            target_mcc = seq[j, 1].long()
+            emb = enc.local_embed(seq[i:j])
+            x.append(emb)
+            targets.append([target_log_amount, target_mcc])
+
+    x = torch.stack(x).detach().cpu().numpy()
+    targets = torch.tensor(targets).detach().cpu().numpy()
+    return x, targets

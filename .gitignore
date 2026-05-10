@@ -8,5 +8,8 @@ wheels/
 
 # Virtual environments
 .venv
+.env
 
 mlruns
+catboost_info
+mlflow.db
