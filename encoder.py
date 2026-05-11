@@ -102,8 +102,8 @@ class LSTMEncoder(nn.Module):
         return event_embeddings
 
     def apply_special_tokens(self, data: torch.Tensor, sep_idx: torch.Tensor, mask_idx: torch.Tensor) -> torch.Tensor:
-        data = torch.where(sep_idx.unsqueeze(1), self.sep_vector.unsqueeze(0), data)
-        data = torch.where(mask_idx.unsqueeze(1), self.mask_vector.unsqueeze(0), data)
+        data = torch.where(sep_idx.unsqueeze(-1), self.sep_vector.unsqueeze(0), data)
+        data = torch.where(mask_idx.unsqueeze(-1), self.mask_vector.unsqueeze(0), data)
         return data
         
     def forward(self, packed_input: PackedSequence) -> Dict[Any, torch.Tensor]:
@@ -139,6 +139,7 @@ class LSTMEncoder(nn.Module):
 
     def local_embed(self, data: torch.Tensor) -> torch.Tensor:
         event_embeddings = self.embed_events(data)
+        event_embeddings = torch.concat([event_embeddings, self.mask_vector.unsqueeze(0)])
         _, (h_n, _) = self.lstm(event_embeddings)
         return self.local_proj(h_n[-1])
     

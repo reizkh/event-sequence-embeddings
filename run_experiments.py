@@ -35,8 +35,8 @@ hyperparams_distributions = {
     "cmlm_lambda": [0.0, 0.001, 0.1],
     "mi_bound_lambda": [0.1, 0.5],
     "club_lr_ratio": [1, 3],
-    "mask_pr": 0.05,
-    "club_pr": 0.05
+    "mask_pr": [0.01],
+    "club_pr": [0.01]
 }
 
 enc_train_dataset, enc_val_dataset, classifier_cv_dataset, test_dataset, vocab_sizes = load_and_split_data(
