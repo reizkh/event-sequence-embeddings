@@ -356,7 +356,8 @@ def create_local_dataset(
     device,
     window_len: int = 32,
     window_stride: int = 32,
-    sep_events: bool = False
+    sep_events: bool = False,
+    global_embed: bool = False
 ):
     enc.eval()
     x = []
@@ -380,7 +381,10 @@ def create_local_dataset(
 
             target_log_amount = seq[j, 0]
             target_mcc = seq[j, 1].long()
-            emb = enc.local_embed(seq[i:j])
+            if global_embed:
+                emb = enc.global_embed(seq[i:j])
+            else:
+                emb = enc.local_embed(seq[i:j])
             x.append(emb)
             targets.append([target_log_amount, target_mcc])
 
