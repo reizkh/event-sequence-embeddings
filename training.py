@@ -50,7 +50,8 @@ def train_encoder(
     
     encoder = LSTMEncoder(
         cat_vocab_sizes=vocab_sizes,
-        hidden_size=hyperparams["embedding_size"],
+        hidden_size=hyperparams["hidden_size"],
+        embedding_size=hyperparams["embedding_size"],
         sep_tokens=hyperparams["add_sep"],
         mask_pr=hyperparams["mask_pr"],
         club_pr=hyperparams["club_pr"]
@@ -205,7 +206,8 @@ def train_encoder(
     )
     best_encoder = LSTMEncoder(
         cat_vocab_sizes=vocab_sizes,
-        hidden_size=hyperparams["embedding_size"]
+        hidden_size=hyperparams["hidden_size"],
+        embedding_size=hyperparams["embedding_size"]
     ).to(device)
     best_encoder.load_state_dict(torch.load(path, map_location=device))
     os.remove(path)
