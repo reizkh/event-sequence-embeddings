@@ -17,8 +17,8 @@ dotenv.load_dotenv()
 
 
 hyperparams_distributions = {
-    "embedding_size": [128],
-    "category_embedding_size": [128],
+    "hidden_size": [128],
+    "embedding_size": [24],
     "num_epochs": [2],
     "margin": [0.5],
     "learning_rate": [1e-3],
@@ -82,8 +82,6 @@ for hyperparams in tqdm(sampler, desc="Random search of hyperparameters", leave=
             best_encoder,
             classifier_cv_dataset,
             device,
-            window_stride=8,
-            sep_events=hyperparams["add_sep"]
         )
         run_local_cv(
             local_eval_ds,

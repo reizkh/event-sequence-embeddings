@@ -25,7 +25,8 @@ class LSTMEncoder(nn.Module):
     def __init__(
         self, 
         cat_vocab_sizes: List[int],
-        hidden_size: int, 
+        hidden_size: int,
+        embedding_size: int,
         batch_first: bool = True,
         num_numerical_features: int = 1,
         mask_pr: float = 0.02,
@@ -62,8 +63,8 @@ class LSTMEncoder(nn.Module):
         intermediate_dim = num_numerical_features + sum(cat_vocab_sizes)
         self.linear = nn.Linear(in_features=intermediate_dim, out_features=hidden_size)
 
-        self.global_proj = nn.Linear(in_features=hidden_size, out_features=hidden_size)
-        self.local_proj = nn.Linear(in_features=hidden_size, out_features=hidden_size)
+        self.global_proj = nn.Linear(in_features=hidden_size, out_features=embedding_size)
+        self.local_proj = nn.Linear(in_features=hidden_size, out_features=embedding_size)
 
         self.sep_vector = nn.Parameter(torch.empty([self.hidden_size]))
         self.mask_vector = nn.Parameter(torch.empty([self.hidden_size]))
@@ -123,7 +124,7 @@ class LSTMEncoder(nn.Module):
         
         coles_vectors = self.global_proj(h_n[-1])
         cmlm_queries = self.local_proj(h_t[mask_idx])
-        cmlm_targets = event_embeddings[mask_idx]
+        cmlm_targets = self.local_proj(event_embeddings[mask_idx])
 
         rand_idx = torch.rand(data.shape[0], device=data.device) < self.club_pr
         club_z1 = self.global_proj(h_t[rand_idx])
