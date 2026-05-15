@@ -123,8 +123,8 @@ class LSTMEncoder(nn.Module):
         h_t = h_t.data
         
         coles_vectors = self.global_proj(h_n[-1])
-        cmlm_queries = self.local_proj(h_t[mask_idx])
-        cmlm_targets = self.local_proj(event_embeddings[mask_idx])
+        cmlm_queries = self.global_proj(h_t[mask_idx])
+        cmlm_targets = self.global_proj(event_embeddings[mask_idx])
 
         rand_idx = torch.rand(data.shape[0], device=data.device) < self.club_pr
         club_z1 = self.global_proj(h_t[rand_idx])
@@ -142,7 +142,7 @@ class LSTMEncoder(nn.Module):
         event_embeddings = self.embed_events(data)
         event_embeddings = torch.concat([event_embeddings, self.mask_vector.unsqueeze(0)])
         _, (h_n, _) = self.lstm(event_embeddings)
-        return self.local_proj(h_n[-1])
+        return self.global_proj(h_n[-1])
     
     def global_embed(self, data: torch.Tensor) -> torch.Tensor:
         event_embeddings = self.embed_events(data)
