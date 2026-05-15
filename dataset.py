@@ -323,7 +323,7 @@ def load_and_split_data(
 @torch.no_grad()
 def create_global_dataset(
     model: LSTMEncoder,
-    dataset: ClientTransactionsDataset, 
+    dataset: ClientTransactionsDataset,
     device
 ) -> Tuple[np.ndarray, np.ndarray]:
     model.eval()
@@ -333,20 +333,14 @@ def create_global_dataset(
     dataloader = DataLoader(
         dataset,
         shuffle=False,
-        batch_size=64,
         collate_fn=lambda batch: random_slices_collate_fn(batch, 10000, 10000, 1),
         drop_last=False
     )
     pbar = tqdm(dataloader, desc="Creating vector dataset")
-    for ids, transactions, lengths in pbar:
-        packed_inputs = nn.utils.rnn.pack_padded_sequence(
-            transactions,
-            lengths=lengths,
-            batch_first=True,
-            enforce_sorted=False
-        ).to(device)
-        vector_dataset.append(model.global_embed(packed_inputs).detach().cpu().numpy())
-    vector_dataset = np.concat(vector_dataset)
+    for _, seq, _ in pbar:
+        seq = seq[0].to(device)
+        vector_dataset.append(model.global_embed(seq).detach().cpu().numpy())
+    vector_dataset = np.stack(vector_dataset)
     return vector_dataset, labels
 
 @torch.no_grad()

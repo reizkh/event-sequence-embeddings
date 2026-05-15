@@ -143,8 +143,7 @@ class LSTMEncoder(nn.Module):
         _, (h_n, _) = self.lstm(event_embeddings)
         return self.local_proj(h_n[-1])
     
-    def global_embed(self, packed_input: PackedSequence) -> torch.Tensor:
-        data = packed_input.data
+    def global_embed(self, data: torch.Tensor) -> torch.Tensor:
         event_embeddings = self.embed_events(data)
-        _, (h_n, _) = self.lstm(packed_input._replace(data=event_embeddings))
+        _, (h_n, _) = self.lstm(event_embeddings)
         return self.global_proj(h_n[-1])
