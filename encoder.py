@@ -65,6 +65,7 @@ class LSTMEncoder(nn.Module):
 
         self.global_proj = nn.Sequential(
             nn.Linear(hidden_size, hidden_size),
+            nn.BatchNorm1d(hidden_size),
             nn.ReLU(),
             nn.Linear(hidden_size, embedding_size)
         )
@@ -146,9 +147,9 @@ class LSTMEncoder(nn.Module):
         event_embeddings = self.embed_events(data)
         event_embeddings = torch.concat([event_embeddings, self.mask_vector.unsqueeze(0)])
         _, (h_n, _) = self.lstm(event_embeddings)
-        return self.global_proj(h_n[-1])
+        return self.global_proj(h_n[-1].unsqueeze(0)).squeeze(0)
     
     def global_embed(self, data: torch.Tensor) -> torch.Tensor:
         event_embeddings = self.embed_events(data)
         _, (h_n, _) = self.lstm(event_embeddings)
-        return self.global_proj(h_n[-1])
+        return self.global_proj(h_n[-1].unsqueeze(0)).squeeze(0)
