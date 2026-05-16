@@ -64,8 +64,8 @@ class LSTMEncoder(nn.Module):
         self.linear = nn.Linear(in_features=intermediate_dim, out_features=hidden_size)
 
         self.global_proj = nn.Sequential(
-            nn.Linear(hidden_size, hidden_size),
             nn.BatchNorm1d(hidden_size),
+            nn.Linear(hidden_size, hidden_size),
             nn.ReLU(),
             nn.Linear(hidden_size, embedding_size)
         )
