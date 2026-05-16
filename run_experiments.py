@@ -18,7 +18,7 @@ dotenv.load_dotenv()
 
 hyperparams_distributions = {
     "hidden_size": [128],
-    "embedding_size": [24],
+    "embedding_size": [128],
     "num_epochs": [2],
     "margin": [0.5],
     "learning_rate": [1e-3],
