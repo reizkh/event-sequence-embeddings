@@ -57,27 +57,36 @@ def train_encoder(
         club_pr=hyperparams["club_pr"]
     ).to(device)
 
+    enc_parameters = [
+        {
+            "params": [p for n, p in encoder.named_parameters() if n.endswith("proj")],
+            "weight_decay": hyperparams["proj_weight_decay"]
+        },
+        {
+            "params": [p for n, p in encoder.named_parameters() if not n.endswith("proj")],
+            "weight_decay": hyperparams["weight_decay"]
+        }
+    ]
+
     club = CLUB(
         emb_dim=hyperparams["embedding_size"]
     ).to(device)
 
     if hyperparams["optimizer"] == "SGD":
         opt_enc = torch.optim.SGD(
-            encoder.parameters(),
+            enc_parameters,
             lr=hyperparams["learning_rate"],
-            weight_decay=hyperparams["weight_decay"]
         )
         opt_club = torch.optim.SGD(
             club.parameters(),
             lr=hyperparams["learning_rate"] * hyperparams["club_lr_ratio"],
         )
     elif hyperparams["optimizer"] == "Adam":
-        opt_enc = torch.optim.Adam(
-            encoder.parameters(),
+        opt_enc = torch.optim.AdamW(
+            enc_parameters,
             lr=hyperparams["learning_rate"],
-            weight_decay=hyperparams["weight_decay"]
         )
-        opt_club = torch.optim.Adam(
+        opt_club = torch.optim.AdamW(
             club.parameters(),
             lr=hyperparams["learning_rate"] * hyperparams["club_lr_ratio"],
         )
@@ -106,6 +115,13 @@ def train_encoder(
     )
 
     best_loss = float('inf')
+    def nan_hook(module, input, output):
+        if isinstance(output, torch.Tensor):
+            if torch.isnan(output).any():
+                raise RuntimeError(f"NaN в {module.__class__.__name__}")
+
+    for module in encoder.modules():
+        module.register_forward_hook(nan_hook)
     for epoch in trange(hyperparams["num_epochs"], desc="Epoch"):
         # --- Training Phase ---
         encoder.train()
