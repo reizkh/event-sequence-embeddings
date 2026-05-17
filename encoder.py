@@ -12,7 +12,7 @@ class ResidualBlock(nn.Module):
             features_out: int
         ):
         super().__init__()
-        self.bn = nn.BatchNorm1d(features_in, eps=1e3)
+        self.bn = nn.BatchNorm1d(features_in, eps=100)
         if features_in == features_out:
             self.id = nn.Identity()
         else:
