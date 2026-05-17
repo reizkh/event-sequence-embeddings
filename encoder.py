@@ -12,7 +12,6 @@ class ResidualBlock(nn.Module):
             features_out: int
         ):
         super().__init__()
-        self.bn = nn.BatchNorm1d(features_in)
         if features_in == features_out:
             self.id = nn.Identity()
         else:
@@ -24,7 +23,6 @@ class ResidualBlock(nn.Module):
         )
     
     def forward(self, x: torch.Tensor) -> torch.Tensor:
-        x = self.bn(x)
         identity = self.id(x)
         x = self.nonlinear(x)
         return identity + x
