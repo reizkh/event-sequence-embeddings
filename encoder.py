@@ -9,7 +9,8 @@ class ResidualBlock(nn.Module):
     def __init__(
             self,
             features_in: int,
-            features_out: int
+            features_out: int,
+            coeff: float = 0.1
         ):
         super().__init__()
         if features_in == features_out:
@@ -18,7 +19,7 @@ class ResidualBlock(nn.Module):
             self.id = nn.Linear(features_in, features_out)
         self.nonlinear = nn.Sequential(
             nn.Linear(features_in, features_in),
-            nn.ReLU(),
+            nn.GELU(),
             nn.Linear(features_in, features_out)
         )
     
