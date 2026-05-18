@@ -79,11 +79,7 @@ class LSTMEncoder(nn.Module):
         self.club_pr = club_pr
         self.sep_tokens = sep_tokens
 
-        # Инициализация нормализации для числовых признаков
-        if num_numerical_features > 0:
-            self.numerical_bn = nn.BatchNorm1d(num_numerical_features)
-        else:
-            self.numerical_bn = nn.Identity()
+        self.numerical_bn = nn.Identity()
 
         intermediate_dim = num_numerical_features + sum(cat_vocab_sizes)
         self.linear = nn.Linear(intermediate_dim, hidden_size)
