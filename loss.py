@@ -31,7 +31,7 @@ def softmax_loss(
     weights = 1.0 - torch.eye(targets.shape[0], device=queries.device)
     neg_indices = torch.multinomial(weights, neg_samples)
 
-    neg_vectors = queries[neg_indices]
+    neg_vectors = targets[neg_indices]
 
     pos = torch.exp((queries * targets).sum(-1))
     neg = torch.exp(torch.einsum("nmd,nd->nm", neg_vectors, queries)).sum(-1)
