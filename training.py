@@ -154,8 +154,7 @@ def train_encoder(
             opt_enc.zero_grad()
             loss = (
                 contrastive_loss_euclidean(ids, embeddings["coles_vectors"], margin=hyperparams["margin"]) +
-                hyperparams["cmlm_lambda"] * softmax_loss(embeddings["cmlm_queries"], embeddings["cmlm_targets"]) + 
-                hyperparams["mi_bound_lambda"] * mi_bound
+                hyperparams["cmlm_lambda"] * softmax_loss(embeddings["cmlm_queries"], embeddings["cmlm_targets"])
             )
             loss.backward()
             torch.nn.utils.clip_grad_norm_(encoder.parameters(), max_norm=1.0)
@@ -192,8 +191,7 @@ def train_encoder(
 
                 loss = (
                     contrastive_loss_euclidean(ids, embeddings["coles_vectors"], margin=hyperparams["margin"]) +
-                    hyperparams["cmlm_lambda"] * softmax_loss(embeddings["cmlm_queries"], embeddings["cmlm_targets"]) + 
-                    hyperparams["mi_bound_lambda"] * mi_bound
+                    hyperparams["cmlm_lambda"] * softmax_loss(embeddings["cmlm_queries"], embeddings["cmlm_targets"])
                 )
                 val_metrics["epoch_loss"] += loss.item()
                 val_metrics["club_pos"] += pos_term.item()
