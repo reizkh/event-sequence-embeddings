@@ -79,13 +79,11 @@ class LSTMEncoder(nn.Module):
         self.club_pr = club_pr
         self.sep_tokens = sep_tokens
 
-        self.numerical_bn = nn.Identity()
-
         intermediate_dim = num_numerical_features + sum(cat_vocab_sizes)
         self.linear = nn.Linear(intermediate_dim, hidden_size)
 
         self.global_proj = ResidualBlock(hidden_size, embedding_size)
-        self.local_proj = nn.Linear(hidden_size, embedding_size)
+        self.local_proj = ResidualBlock(hidden_size, embedding_size)
 
         self.sep_vector = nn.Parameter(torch.empty([self.hidden_size]))
         self.mask_vector = nn.Parameter(torch.empty([self.hidden_size]))
@@ -108,8 +106,7 @@ class LSTMEncoder(nn.Module):
         # Обработка числовых признаков
         if self.num_numerical_features > 0:
             numerical_data = data[:, :self.num_numerical_features]
-            numerical_normalized = self.numerical_bn(numerical_data)
-            processed_features.append(numerical_normalized)
+            processed_features.append(numerical_data)
         
         # Обработка категориальных признаков
         cat_start_idx = self.num_numerical_features
@@ -144,8 +141,8 @@ class LSTMEncoder(nn.Module):
         h_t = h_t.data
         
         coles_vectors = self.global_proj(h_n[-1])
-        cmlm_queries = self.global_proj(h_t[mask_idx])
-        cmlm_targets = self.global_proj(event_embeddings[mask_idx])
+        cmlm_queries = self.local_proj(h_t[mask_idx])
+        cmlm_targets = self.local_proj(event_embeddings[mask_idx])
 
         rand_idx = torch.rand(data.shape[0], device=data.device) < self.club_pr
         club_z1 = self.global_proj(h_t[rand_idx])
@@ -163,7 +160,7 @@ class LSTMEncoder(nn.Module):
         event_embeddings = self.embed_events(data)
         event_embeddings = torch.concat([event_embeddings, self.mask_vector.unsqueeze(0)])
         _, (h_n, _) = self.lstm(event_embeddings)
-        return self.global_proj(h_n[-1].unsqueeze(0)).squeeze(0)
+        return self.local_proj(h_n[-1].unsqueeze(0)).squeeze(0)
     
     def global_embed(self, data: torch.Tensor) -> torch.Tensor:
         event_embeddings = self.embed_events(data)
