@@ -72,15 +72,19 @@ class LSTMEncoder(nn.Module):
         super(LSTMEncoder, self).__init__()
         
         self.num_numerical_features = num_numerical_features
-        self.cat_vocab_sizes = cat_vocab_sizes
+        self.num_cat_features = len(cat_vocab_sizes)
+        self.num_total_features = self.num_numerical_features + self.num_cat_features
         self.hidden_size = hidden_size
         self.batch_first = batch_first
         self.mask_pr = mask_pr
         self.club_pr = club_pr
         self.sep_tokens = sep_tokens
 
-        intermediate_dim = num_numerical_features + sum(cat_vocab_sizes)
-        self.linear = nn.Linear(intermediate_dim, hidden_size)
+        self.numerical_linear = nn.Linear(num_numerical_features, hidden_size)
+
+        offsets = torch.tensor([0]+cat_vocab_sizes[:-1]).cumsum(0)
+        self.register_buffer("feature_offsets", offsets)
+        self.embedding_bag = nn.EmbeddingBag(sum(cat_vocab_sizes), hidden_size, mode="sum")
 
         self.global_proj = ResidualBlock(hidden_size, embedding_size)
         self.local_proj = ResidualBlock(hidden_size, embedding_size)
@@ -101,24 +105,23 @@ class LSTMEncoder(nn.Module):
         )
 
     def embed_events(self, data: torch.Tensor) -> torch.Tensor:
-        processed_features = []
+        embeddings = torch.zeros([data.shape[0], self.hidden_size], device=data.device)
         
-        # Обработка числовых признаков
-        if self.num_numerical_features > 0:
-            numerical_data = data[:, :self.num_numerical_features]
-            processed_features.append(numerical_data)
+        embeddings += self.numerical_linear(data[:, :self.num_numerical_features])
         
-        # Обработка категориальных признаков
-        cat_start_idx = self.num_numerical_features
-        for i, num_classes in enumerate(self.cat_vocab_sizes):
-            cat_indices = data[:, cat_start_idx + i].long()
-            # Применение OHE
-            encoded_category = F.one_hot(cat_indices, num_classes)
-            processed_features.append(encoded_category)
+        cat_features = data[:, self.num_numerical_features:self.num_total_features].long()
+        shifted_features = cat_features + self.feature_offsets.unsqueeze(0) # type: ignore
+        flat_features = shifted_features.flatten()
+        offsets = torch.arange(
+            0,
+            data.shape[0] * self.num_cat_features,
+            self.num_cat_features,
+            device=data.device
+        )
 
-        intermediate_embedding = torch.cat(processed_features, dim=1)
-        event_embeddings = self.linear(intermediate_embedding)
-        return event_embeddings
+        embeddings += self.embedding_bag(flat_features, offsets)
+
+        return embeddings
 
     def apply_special_tokens(self, data: torch.Tensor, sep_idx: torch.Tensor, mask_idx: torch.Tensor) -> torch.Tensor:
         data = torch.where(sep_idx.unsqueeze(-1), self.sep_vector.unsqueeze(0), data)
