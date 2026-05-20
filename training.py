@@ -105,13 +105,19 @@ def train_encoder(
         batch_size=hyperparams["n_samples_in_batch"],
         shuffle=True,
         collate_fn=collate_fn,
-        drop_last=True
+        drop_last=True,
+        num_workers=2,
+        pin_memory=True,
+        persistent_workers=True
     )
     val_loader = torch.utils.data.DataLoader(
         val_dataset,
         batch_size=hyperparams["n_samples_in_batch"],
         collate_fn=collate_fn,
-        drop_last=True
+        drop_last=True,
+        num_workers=2,
+        pin_memory=True,
+        persistent_workers=True
     )
 
     best_loss = float('inf')
