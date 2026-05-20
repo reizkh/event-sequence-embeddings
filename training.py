@@ -32,12 +32,6 @@ from catboost import CatBoostClassifier, CatBoostRegressor
 #         return super().fit(X_train, y_train, **fit_params)
 
 
-def calculate_snr(log_q: torch.Tensor) -> float:
-    off_diag = log_q[~torch.eye(log_q.size(0), dtype=torch.bool, device=log_q.device)]
-    snr = (torch.diag(log_q) - off_diag.mean()).mean().item() / (off_diag.std().item() + 1e-8)
-    return snr
-
-
 def train_encoder(
     train_dataset: ClientTransactionsDataset,
     val_dataset: ClientTransactionsDataset,
@@ -133,10 +127,7 @@ def train_encoder(
         encoder.train()
         train_metrics = {
             "epoch_loss": 0.0,
-            "club_pos": 0.0,
-            "club_neg": 0.0,
             "mi_bound": 0.0,
-            "signal_to_noise_ratio": 0.0,
             "club_grad_norm": 0.0
         }
         
@@ -146,42 +137,33 @@ def train_encoder(
             ).to(device)
             embeddings = encoder.forward(packed_inputs)
 
-            log_likelihood = club(embeddings["club_z1"].detach(), embeddings["club_z2"].detach())
             opt_club.zero_grad()
-            mle_loss = -log_likelihood.diag().mean()
+            mle_loss = club.learning_loss(embeddings["club_z1"].detach(), embeddings["club_z2"].detach())
             mle_loss.backward()
             opt_club.step()
 
-            log_likelihood = club(embeddings["club_z1"], embeddings["club_z2"])
-            pos_term = log_likelihood.diag().mean()
-            neg_term = log_likelihood.mean()
-            mi_bound = pos_term - neg_term
+            mi_bound = club(embeddings["club_z1"], embeddings["club_z2"])
 
             opt_enc.zero_grad()
             loss = (
                 contrastive_loss_euclidean(ids, embeddings["coles_vectors"], margin=hyperparams["margin"]) +
-                hyperparams["cmlm_lambda"] * softmax_loss(embeddings["cmlm_queries"], embeddings["cmlm_targets"])
+                hyperparams["cmlm_lambda"] * softmax_loss(embeddings["cmlm_queries"], embeddings["cmlm_targets"]) + 
+                hyperparams["mi_bound_lambda"] * mi_bound
             )
             loss.backward()
             torch.nn.utils.clip_grad_norm_(encoder.parameters(), max_norm=1.0)
             opt_enc.step()
             
             train_metrics["epoch_loss"] += loss.item()
-            train_metrics["club_pos"] += pos_term.item()
-            train_metrics["club_neg"] += neg_term.item()
             train_metrics["mi_bound"] += mi_bound.item()
             train_metrics["club_grad_norm"] += sum(p.grad.norm() for p in club.parameters() if p is not None) # type: ignore
-            train_metrics["signal_to_noise_ratio"] += calculate_snr(log_likelihood)
         mlflow.log_metrics({"avg_train_"+key: val / len(train_loader) for key, val in train_metrics.items()}, step=epoch)
 
         # --- Validation Phase ---
         encoder.eval()
         val_metrics = {
             "epoch_loss": 0.0,
-            "club_pos": 0.0,
-            "club_neg": 0.0,
             "mi_bound": 0.0,
-            "signal_to_noise_ratio": 0.0,
         }        
         with torch.no_grad():
             for ids, transactions, lengths in tqdm(val_loader, leave=False, desc="Validation"):
@@ -190,20 +172,15 @@ def train_encoder(
                 ).to(device)
                 embeddings = encoder(packed_inputs)
 
-                log_likelihood = club(embeddings["club_z1"], embeddings["club_z2"])
-                pos_term = log_likelihood.diag().mean()
-                neg_term = log_likelihood.mean()
-                mi_bound = pos_term - neg_term
+                mi_bound = club(embeddings["club_z1"], embeddings["club_z2"])
 
                 loss = (
                     contrastive_loss_euclidean(ids, embeddings["coles_vectors"], margin=hyperparams["margin"]) +
-                    hyperparams["cmlm_lambda"] * softmax_loss(embeddings["cmlm_queries"], embeddings["cmlm_targets"])
+                    hyperparams["cmlm_lambda"] * softmax_loss(embeddings["cmlm_queries"], embeddings["cmlm_targets"]) + 
+                    hyperparams["mi_bound_lambda"] * mi_bound
                 )
                 val_metrics["epoch_loss"] += loss.item()
-                val_metrics["club_pos"] += pos_term.item()
-                val_metrics["club_neg"] += neg_term.item()
                 val_metrics["mi_bound"] += mi_bound.item()
-                val_metrics["signal_to_noise_ratio"] += calculate_snr(log_likelihood)
 
         mlflow.log_metrics({"avg_val_"+key: val / len(val_loader) for key, val in val_metrics.items()}, step=epoch)
 
