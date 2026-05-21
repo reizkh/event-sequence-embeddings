@@ -140,6 +140,8 @@ def train_encoder(
             opt_club.zero_grad()
             mle_loss = club.learning_loss(embeddings["club_z1"].detach(), embeddings["club_z2"].detach())
             mle_loss.backward()
+            train_metrics["club_grad_norm"] += sum(p.grad.norm() for p in club.parameters() if p is not None) # type: ignore
+            torch.nn.utils.clip_grad_norm_(club.parameters(), max_norm=1.0)
             opt_club.step()
 
             mi_bound = club(embeddings["club_z1"], embeddings["club_z2"])
@@ -156,7 +158,6 @@ def train_encoder(
             
             train_metrics["epoch_loss"] += loss.item()
             train_metrics["mi_bound"] += mi_bound.item()
-            train_metrics["club_grad_norm"] += sum(p.grad.norm() for p in club.parameters() if p is not None) # type: ignore
         mlflow.log_metrics({"avg_train_"+key: val / len(train_loader) for key, val in train_metrics.items()}, step=epoch)
 
         # --- Validation Phase ---
