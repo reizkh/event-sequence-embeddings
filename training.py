@@ -57,27 +57,36 @@ def train_encoder(
         club_pr=hyperparams["club_pr"]
     ).to(device)
 
+    enc_parameters = [
+        {
+            "params": [p for n, p in encoder.named_parameters() if n.endswith("proj")],
+            "weight_decay": hyperparams["proj_weight_decay"]
+        },
+        {
+            "params": [p for n, p in encoder.named_parameters() if not n.endswith("proj")],
+            "weight_decay": hyperparams["weight_decay"]
+        }
+    ]
+
     club = CLUB(
         emb_dim=hyperparams["embedding_size"]
     ).to(device)
 
     if hyperparams["optimizer"] == "SGD":
         opt_enc = torch.optim.SGD(
-            encoder.parameters(),
+            enc_parameters,
             lr=hyperparams["learning_rate"],
-            weight_decay=hyperparams["weight_decay"]
         )
         opt_club = torch.optim.SGD(
             club.parameters(),
             lr=hyperparams["learning_rate"] * hyperparams["club_lr_ratio"],
         )
     elif hyperparams["optimizer"] == "Adam":
-        opt_enc = torch.optim.Adam(
-            encoder.parameters(),
+        opt_enc = torch.optim.AdamW(
+            enc_parameters,
             lr=hyperparams["learning_rate"],
-            weight_decay=hyperparams["weight_decay"]
         )
-        opt_club = torch.optim.Adam(
+        opt_club = torch.optim.AdamW(
             club.parameters(),
             lr=hyperparams["learning_rate"] * hyperparams["club_lr_ratio"],
         )
@@ -96,16 +105,29 @@ def train_encoder(
         batch_size=hyperparams["n_samples_in_batch"],
         shuffle=True,
         collate_fn=collate_fn,
-        drop_last=True
+        drop_last=True,
+        num_workers=2,
+        pin_memory=True,
+        persistent_workers=True
     )
     val_loader = torch.utils.data.DataLoader(
         val_dataset,
         batch_size=hyperparams["n_samples_in_batch"],
         collate_fn=collate_fn,
-        drop_last=True
+        drop_last=True,
+        num_workers=2,
+        pin_memory=True,
+        persistent_workers=True
     )
 
     best_loss = float('inf')
+    def nan_hook(module, input, output):
+        if isinstance(output, torch.Tensor):
+            if torch.isnan(output).any():
+                raise RuntimeError(f"NaN в {module.__class__.__name__}")
+
+    for module in encoder.modules():
+        module.register_forward_hook(nan_hook)
     for epoch in trange(hyperparams["num_epochs"], desc="Epoch"):
         # --- Training Phase ---
         encoder.train()
@@ -138,8 +160,7 @@ def train_encoder(
             opt_enc.zero_grad()
             loss = (
                 contrastive_loss_euclidean(ids, embeddings["coles_vectors"], margin=hyperparams["margin"]) +
-                hyperparams["cmlm_lambda"] * softmax_loss(embeddings["cmlm_queries"], embeddings["cmlm_targets"]) + 
-                hyperparams["mi_bound_lambda"] * mi_bound
+                hyperparams["cmlm_lambda"] * softmax_loss(embeddings["cmlm_queries"], embeddings["cmlm_targets"])
             )
             loss.backward()
             torch.nn.utils.clip_grad_norm_(encoder.parameters(), max_norm=1.0)
@@ -176,8 +197,7 @@ def train_encoder(
 
                 loss = (
                     contrastive_loss_euclidean(ids, embeddings["coles_vectors"], margin=hyperparams["margin"]) +
-                    hyperparams["cmlm_lambda"] * softmax_loss(embeddings["cmlm_queries"], embeddings["cmlm_targets"]) + 
-                    hyperparams["mi_bound_lambda"] * mi_bound
+                    hyperparams["cmlm_lambda"] * softmax_loss(embeddings["cmlm_queries"], embeddings["cmlm_targets"])
                 )
                 val_metrics["epoch_loss"] += loss.item()
                 val_metrics["club_pos"] += pos_term.item()

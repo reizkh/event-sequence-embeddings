@@ -17,9 +17,9 @@ dotenv.load_dotenv()
 
 
 hyperparams_distributions = {
-    "hidden_size": [128],
-    "embedding_size": [24],
-    "num_epochs": [2],
+    "hidden_size": [8],
+    "embedding_size": [8],
+    "num_epochs": [1],
     "margin": [0.5],
     "learning_rate": [1e-3],
     "weight_decay": [2e-5],
@@ -32,9 +32,9 @@ hyperparams_distributions = {
     "classifier": ["logistic_regression"],
     "optimizer": ["Adam"],
     "add_sep": [False],
-    "cmlm_lambda": [0.0, 0.001, 0.1],
-    "mi_bound_lambda": [0.1, 0.5],
-    "club_lr_ratio": [1, 3],
+    "cmlm_lambda": [0.0],
+    "mi_bound_lambda": [1e-5],
+    "club_lr_ratio": [1e-5],
     "mask_pr": [0.01],
     "club_pr": [0.01]
 }

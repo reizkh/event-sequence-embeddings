@@ -44,7 +44,7 @@ def run_local_cv(
     mlflow.log_metric("local_CV_logamount_r2", (1 + amount_cv_results["test_score"]/var).mean())
 
     mcc_model = LogisticRegression()
-    cv_labels[:, 1:2] = OrdinalEncoder(max_categories=10).fit_transform(cv_labels[:, 1:2]) # type: ignore
+    cv_labels[:, 1:2] = OrdinalEncoder(max_categories=50).fit_transform(cv_labels[:, 1:2]) # type: ignore
     mcc_cv_results = cross_validate(
         mcc_model, # type: ignore
         cv_vector_dataset,
