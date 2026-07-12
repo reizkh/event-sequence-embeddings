@@ -10,7 +10,6 @@ class ResidualBlock(nn.Module):
             self,
             features_in: int,
             features_out: int,
-            coeff: float = 0.1
         ):
         super().__init__()
         if features_in == features_out:
