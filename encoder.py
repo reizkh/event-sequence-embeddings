@@ -81,8 +81,8 @@ class LSTMEncoder(nn.Module):
         intermediate_dim = num_numerical_features + sum(cat_vocab_sizes)
         self.linear = nn.Linear(intermediate_dim, hidden_size)
 
-        self.global_proj = nn.Identity(hidden_size, embedding_size)
-        self.local_proj = nn.Identity(hidden_size, embedding_size)
+        self.global_proj = ResidualBlock(hidden_size, embedding_size)
+        self.local_proj = ResidualBlock(hidden_size, embedding_size)
 
         self.sep_vector = nn.Parameter(torch.empty([self.hidden_size]))
         self.mask_vector = nn.Parameter(torch.empty([self.hidden_size]))
