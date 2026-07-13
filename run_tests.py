@@ -24,6 +24,8 @@ enc_train_dataset, enc_val_dataset, classifier_cv_dataset, test_dataset, vocab_s
 )
 
 dagshub.init("event-sequence-embeddings", "reizkh")
+mlflow.config.enable_async_logging()
+mlflow.set_experiment("CoLES+CMLM / LSTM eval")
 device = "cuda" if torch.cuda.is_available() else "cpu"
 rounds = 5
 for hyperparams in param_grid:
@@ -58,7 +60,7 @@ for hyperparams in param_grid:
                 device
             )
 
-            label_transform = OrdinalEncoder(max_categories=10) # type: ignore
+            label_transform = OrdinalEncoder(max_categories=50) # type: ignore
             local_labels[:, 1:] = label_transform.fit_transform(local_labels[:, 1:])
             test_local_labels[:, 1:] = label_transform.transform(test_local_labels[:, 1:])
 
