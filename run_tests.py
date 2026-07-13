@@ -25,7 +25,7 @@ enc_train_dataset, enc_val_dataset, classifier_cv_dataset, test_dataset, vocab_s
 
 dagshub.init("event-sequence-embeddings", "reizkh")
 mlflow.config.enable_async_logging()
-mlflow.set_experiment("CoLES+CMLM / LSTM eval")
+mlflow.set_experiment("CoLES+CMLM / LSTM+1-MLP eval")
 device = "cuda" if torch.cuda.is_available() else "cpu"
 rounds = 5
 for hyperparams in param_grid:
