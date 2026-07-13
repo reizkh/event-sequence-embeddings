@@ -23,7 +23,7 @@ enc_train_dataset, enc_val_dataset, classifier_cv_dataset, test_dataset, vocab_s
     add_sep=param_grid[0]["add_sep"]
 )
 
-# dagshub.init("event-sequence-embeddings", "reizkh")
+dagshub.init("event-sequence-embeddings", "reizkh")
 device = "cuda" if torch.cuda.is_available() else "cpu"
 rounds = 5
 for hyperparams in param_grid:
