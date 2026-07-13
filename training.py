@@ -55,7 +55,6 @@ def train_encoder(
         sep_tokens=hyperparams["add_sep"],
         mask_pr=hyperparams["mask_pr"],
         club_pr=hyperparams["club_pr"],
-        num_numerical_features=len(hyperparams["cat_features"])
     ).to(device)
 
     enc_parameters = [
@@ -229,7 +228,6 @@ def train_encoder(
         cat_vocab_sizes=vocab_sizes,
         hidden_size=hyperparams["hidden_size"],
         embedding_size=hyperparams["embedding_size"],
-        num_numerical_features=len(hyperparams["cat_features"])
     ).to(device)
     best_encoder.load_state_dict(torch.load(path, map_location=device))
     os.remove(path)
