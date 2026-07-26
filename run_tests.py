@@ -3,6 +3,7 @@ from dataset import load_and_split_data, create_global_dataset, create_local_dat
 
 import dagshub
 import mlflow
+import mlflow.config
 import torch
 import dotenv
 from sklearn.metrics import roc_auc_score, root_mean_squared_error
@@ -16,16 +17,14 @@ with open("eval_param_grid.yaml") as f:
     param_grid = list(ParameterGrid(yaml.safe_load(f)))
 
 enc_train_dataset, enc_val_dataset, classifier_cv_dataset, test_dataset, vocab_sizes = load_and_split_data(
-    "pytorch-lifestream/rosbank-churn", 
-    "pytorch-lifestream/rosbank-churn",
+    param_grid[0]["dataset"], 
     cat_features=param_grid[0]["cat_features"],
     cat_coverage=param_grid[0]["cat_coverage"],
-    add_sep=param_grid[0]["add_sep"]
 )
 
 dagshub.init("event-sequence-embeddings", "reizkh")
 mlflow.config.enable_async_logging()
-mlflow.set_experiment("CoLES+CMLM / LSTM+2MLP eval")
+mlflow.set_experiment(f"{param_grid[0]["dataset"]}| CoLES+CMLM | LSTM+2MLP eval")
 device = "cuda" if torch.cuda.is_available() else "cpu"
 rounds = 5
 for hyperparams in param_grid:
@@ -75,10 +74,6 @@ for hyperparams in param_grid:
             roc_auc = roc_auc_score(test_global_labels, y_pred)
             mlflow.log_metric("global_test_rocauc", float(roc_auc))
 
-            y_pred = models[1].predict(test_local_dataset)
-            rmse = root_mean_squared_error(test_local_labels[:, 0], y_pred)
-            mlflow.log_metric("local_test_logamount_rmse", rmse)
-
-            y_pred = models[2].predict_proba(test_local_dataset)
+            y_pred = models[1].predict_proba(test_local_dataset)
             roc_auc = roc_auc_score(test_local_labels[:, 1], y_pred, average="weighted", multi_class="ovr")
             mlflow.log_metric("local_test_mcc_rocauc", float(roc_auc))

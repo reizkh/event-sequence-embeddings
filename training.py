@@ -246,13 +246,7 @@ def train_downstream_models(
     )
     churn_model.fit(global_vector_dataset, global_labels)
 
-    amount_model = CatBoostRegressor(
-        verbose=0,
-        task_type="GPU" if torch.cuda.is_available() else "CPU"
-    )
-    amount_model.fit(local_vector_dataset, local_labels[:, 0])
-
     mcc_model = LogisticRegression()
     mcc_model.fit(local_vector_dataset, local_labels[:, 1])
 
-    return churn_model, amount_model, mcc_model
+    return churn_model, mcc_model

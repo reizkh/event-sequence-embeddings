@@ -29,20 +29,6 @@ def run_local_cv(
     cv_vector_dataset: np.ndarray,
     cv_labels: np.ndarray
 ) -> None:
-    amount_model = CatBoostRegressor(
-        verbose=0,
-        task_type="GPU" if torch.cuda.is_available() else "CPU"
-    )
-    amount_cv_results = cross_validate(
-        amount_model, # type: ignore
-        cv_vector_dataset,
-        cv_labels[:, 0],
-        scoring="neg_root_mean_squared_error"
-    )
-    mlflow.log_metric("local_CV_logamount_rmse", -amount_cv_results["test_score"].mean())
-    var = cv_labels[:, 0].var()
-    mlflow.log_metric("local_CV_logamount_r2", (1 + amount_cv_results["test_score"]/var).mean())
-
     mcc_model = LogisticRegression()
     cv_labels[:, 1:2] = OrdinalEncoder(max_categories=50).fit_transform(cv_labels[:, 1:2]) # type: ignore
     mcc_cv_results = cross_validate(
