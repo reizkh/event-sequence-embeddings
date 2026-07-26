@@ -13,3 +13,8 @@ wheels/
 mlruns
 catboost_info
 mlflow.db
+
+# Datasets
+*.parquet
+*.csv
+*.zip
