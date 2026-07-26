@@ -1,6 +1,8 @@
 from encoder import LSTMEncoder
 
 
+import os
+
 import torch
 from torch import nn
 import pandas as pd
@@ -10,18 +12,17 @@ from typing import List, Tuple, Union, Dict, Any, Optional
 import random
 import numpy as np
 from tqdm.auto import tqdm
-from datasets import load_dataset
 from sklearn.model_selection import train_test_split
 
 class ClientTransactionsDataset(Dataset):
     """
     Класс датасета для загрузки транзакций клиентов.
 
-    Данные группируются по полю 'cl_id'. Категориальные признаки преобразуются 
+    Данные группируются по полю 'user_id'. Категориальные признаки преобразуются 
     в индексы на основе предоставленных или автоматически сгенерированных словарей.
 
     Атрибуты:
-        - cl_ids (List): Список уникальных идентификаторов клиентов.
+        - user_ids (List): Список уникальных идентификаторов клиентов.
         - transactions (List[torch.Tensor]): Список тензоров признаков для каждого клиента.
         - labels (List[int]): Список целевых меток (при наличии).
         - cat_vocabularies (Dict[str, Dict]): Словари соответствия значений категориальных 
@@ -33,28 +34,27 @@ class ClientTransactionsDataset(Dataset):
         self, 
         df: pd.DataFrame, 
         cat_cols: List[str],
-        sep_events: bool = True
     ):
         """
         Инициализация датасета и предварительная обработка данных.
 
-        :param pd.DataFrame df: DataFrame, содержащий колонки 'cl_id', 'amount', 
+        :param pd.DataFrame df: DataFrame, содержащий колонки 'user_id', 'amount', 
                                 а также указанные категориальные колонки.
         :param List[str] cat_cols: Список имен колонок, содержащих категориальные признаки.
         """
         super().__init__()
         
         # Валидация входных данных
-        required_columns = {'cl_id', 'amount'}.union(set(cat_cols))
+        required_columns = {'user_id', 'amount'}.union(set(cat_cols))
 
         if not required_columns.issubset(df.columns):
             missing = required_columns - set(df.columns)
             raise ValueError(f"DataFrame должен содержать колонки: {missing}")
         
-        self.label = "target_flag" in df.columns
+        self.label = "target" in df.columns
         self.cat_cols = cat_cols
         
-        self.cl_ids: List[Union[int, str]] = []
+        self.user_ids: List[Union[int, str]] = []
         self.transactions: List[torch.Tensor] = []
         self.labels: List[int] = []
         
@@ -69,11 +69,11 @@ class ClientTransactionsDataset(Dataset):
             self.cat_vocabularies[col] = {val: idx for idx, val in enumerate(unique_values)}
             self.cat_vocab_sizes[col] = len(unique_values)
         
-        # Группировка данных по cl_id
-        grouped = df.groupby('cl_id', sort=True)
+        # Группировка данных по user_id
+        grouped = df.groupby('user_id', sort=True)
         
-        for cl_id, group in grouped:
-            self.cl_ids.append(cl_id) # type: ignore
+        for user_id, group in grouped:
+            self.user_ids.append(user_id) # type: ignore
 
             # Обработка числовых признаков (amount)
             # Приведение к тензору и добавление размерности [N, 1]
@@ -87,9 +87,6 @@ class ClientTransactionsDataset(Dataset):
                 cat_tensor = torch.tensor(indices, dtype=torch.long).unsqueeze(1)
                 cat_tensors.append(cat_tensor)
             
-            if sep_events:
-                cat_tensors.append(torch.tensor(group["is_sep"].to_numpy()).unsqueeze(1))
-                        
             # Конкатенация признаков: [amount, cat_col_1, cat_col_2, ...]
             # Итоговая размерность последовательности: [N, 1 + len(cat_cols)]
             if cat_tensors:
@@ -100,16 +97,16 @@ class ClientTransactionsDataset(Dataset):
             self.transactions.append(features)
             
             if self.label:
-                self.labels.append(group["target_flag"].iloc[0])
+                self.labels.append(group["target"].iloc[0])
 
     def __len__(self) -> int:
         """
         Возвращает количество уникальных клиентов в датасете.
 
-        :returns: Количество элементов (уникальных ``cl_id``).
+        :returns: Количество элементов (уникальных ``user_id``).
         :rtype: int
         """
-        return len(self.cl_ids)
+        return len(self.user_ids)
     
     def __getitem__(self, idx: int) -> Tuple[Union[int, str], torch.Tensor, Optional[int]]:
         """
@@ -119,21 +116,21 @@ class ClientTransactionsDataset(Dataset):
             
         :rtype: Tuple[Union[int, str], torch.Tensor, Optional[int]]
         :returns:
-        Кортеж ``(cl_id, features, label)`` содержащий:
+        Кортеж ``(user_id, features, label)`` содержащий:
 
-        * ``cl_id`` — идентификатор клиента.
+        * ``user_id`` — идентификатор клиента.
         * ``features`` — тензор размера ``[N_transactions, 1 + len(cat_cols)]``.
         * ``label`` — целевая метка (или None, если отсутствует).
         """
         if idx >= len(self):
             raise IndexError(f"Индекс {idx} выходит за границы датасета (размер: {len(self)})")
             
-        cl_id = self.cl_ids[idx]
+        user_id = self.user_ids[idx]
         features = self.transactions[idx]
 
         if self.label:
-            return cl_id, features, self.labels[idx]
-        return cl_id, features, None
+            return user_id, features, self.labels[idx]
+        return user_id, features, None
     
 def random_slices_collate_fn(
     batch: List[Tuple[Any, torch.Tensor, Any]], 
@@ -146,7 +143,7 @@ def random_slices_collate_fn(
     Collate function, реализующая стратегию случайной выборки подпоследовательностей.
     
     :param List[Tuple[Any, torch.Tensor]] batch:
-        Список кортежей (cl_id, transactions), где transactions имеет форму [T, feature_dim]
+        Список кортежей (user_id, transactions), где transactions имеет форму [T, feature_dim]
     :param int m:
         Минимальная длина подпоследовательности
     :param int M:
@@ -158,13 +155,13 @@ def random_slices_collate_fn(
         
     :rtype: Tuple[List[Any], torch.Tensor, torch.Tensor]
     :returns:
-    Кортеж ``(cl_ids, padded_subsequences, lengths)``, где:
+    Кортеж ``(user_ids, padded_subsequences, lengths)``, где:
 
-    * ``cl_ids`` — список идентификаторов клиентов повторяется k раз для каждого клиента)
+    * ``user_ids`` — список идентификаторов клиентов повторяется k раз для каждого клиента)
     * ``padded_subsequences`` — тензор формы ``[batch_size * k, max_len, feature_dim]``.
     * ``lengths`` — тензор формы ``[batch_size * k]`` с фактическими длинами подпоследовательностей.
     """
-    cl_ids = []
+    user_ids = []
     subsequences = []
     lengths = []
     
@@ -186,7 +183,7 @@ def random_slices_collate_fn(
             # Извлечение подпоследовательности Ŝ_i := {z_{s+j}}_{j=0}^{T_i-1}
             subseq = transactions[s:s + T_i]
             
-            cl_ids.append(client_id)
+            user_ids.append(client_id)
             subsequences.append(subseq)
             lengths.append(T_i)
     
@@ -217,82 +214,34 @@ def random_slices_collate_fn(
     padded_subsequences = torch.stack(padded_subsequences, dim=0)
     lengths = torch.tensor(lengths, dtype=torch.long)
     
-    return cl_ids, padded_subsequences, lengths
+    return user_ids, padded_subsequences, lengths
 
-def add_sep_events(
-    df: pd.DataFrame,
-    cl_id_column: str = "cl_id",
-    date_column: str = "date",
-    is_sep_column: str = "is_sep"
-):
-    df = df.copy()
-    df[is_sep_column] = False
-    sep_rows = {
-        cl_id_column: [],
-        date_column: [],
-    }
-        
-    grouped = df.groupby(cl_id_column, sort=False)
-    for cl_id, group in grouped:
-        group = group.sort_values(date_column).reset_index(drop=True)
-        
-        begin = group[date_column].min()
-        end = group[date_column].max()
-        x = begin
-        while x < end:
-            sep_rows[cl_id_column].append(cl_id)
-            sep_rows[date_column].append(x)
-            x += pd.Timedelta("1d")
-    
-    df_separators = pd.DataFrame(sep_rows)
-    df_separators[is_sep_column] = True
-    df_separators["amount"] = 1.0
-    for col in df.columns:
-        if col not in df_separators.columns:
-            df_separators[col] = "rare"
-    df_result = pd.concat([df, df_separators], ignore_index=True)
-    
-    df_result = df_result.sort_values([cl_id_column, date_column, is_sep_column]).reset_index(drop=True)
-    
-    return df_result
 
 def load_and_split_data(
-    labeled_dataset_path: str,
-    unlabeled_dataset_path: str,
+    parquet_filename: str,
     test_size: float = 0.15,
     val_size: float = 0.15,
     random_state: Optional[int] = 0,
     cat_features: List = ["MCC"],
     cat_coverage: float = 0.9,
-    add_sep: bool = False
 ) -> Tuple[ClientTransactionsDataset, ClientTransactionsDataset, ClientTransactionsDataset, ClientTransactionsDataset, List]:
     """
     Загружает датасеты, объединяет размеченные и неразмеченные данные,
     выполняет разбиение по клиентам и фильтрацию редких MCC-кодов.
     """
-    ds_labeled = load_dataset(labeled_dataset_path, "train")
-    labeled_df: pd.DataFrame = ds_labeled["train"].to_pandas().drop(["target_sum"], axis=1)  # type: ignore
+    full_df = pd.read_parquet(os.path.join(os.environ["DATASETS_ROOT"], parquet_filename))
+    full_df["user_id"] = pd.factorize(full_df.user_id)[0]
 
-    ds_unlabeled = load_dataset(unlabeled_dataset_path, "test")
-    unlabeled_df: pd.DataFrame = ds_unlabeled["train"].to_pandas()  # type: ignore
-    unlabeled_df["target_flag"] = None
+    all_clients = full_df.loc[~full_df["target"].isna(), "user_id"].unique()
 
-    full_df = pd.concat([labeled_df, unlabeled_df], ignore_index=True)
-    full_df["cl_id"] = pd.factorize(full_df.cl_id)[0]
-
-    labeled_clients = full_df.loc[~full_df["target_flag"].isna(), "cl_id"].unique()
-    enc_train_clients_A = full_df.loc[full_df["target_flag"].isna(), "cl_id"].unique()
-    
     crossval_clients, test_clients = train_test_split(
-        labeled_clients, test_size=test_size, random_state=random_state
+        all_clients, test_size=test_size, random_state=random_state
     )
-    enc_train_clients_B, val_clients = train_test_split(
+    enc_train_clients, val_clients = train_test_split(
         crossval_clients, test_size=val_size / (1 - test_size), random_state=random_state
     )
-    
-    enc_train_clients = np.concatenate([enc_train_clients_A, enc_train_clients_B])
 
-    mask_train = full_df["cl_id"].isin(enc_train_clients)
+    mask_train = full_df["user_id"].isin(enc_train_clients)
     vocab_sizes = []
     for cat_feature in cat_features:
         feature_value_counts = full_df.loc[mask_train, cat_feature].value_counts(normalize=True)
@@ -301,22 +250,16 @@ def load_and_split_data(
         
         full_df[cat_feature] = full_df[cat_feature].astype(str).where(full_df[cat_feature].isin(most_frequent_values), "rare")
 
-    full_df['TRDATETIME'] = pd.to_datetime(full_df['TRDATETIME'], format="%d%b%y:%X")
-    full_df["date"] = full_df["TRDATETIME"].dt.date
-
-    if add_sep:
-        full_df = add_sep_events(full_df)
-
-    enc_train_df = full_df[full_df["cl_id"].isin(enc_train_clients)]
-    enc_val_df = full_df[full_df["cl_id"].isin(val_clients)]
-    crossval_df = full_df[full_df["cl_id"].isin(crossval_clients)]
-    test_df = full_df[full_df["cl_id"].isin(test_clients)]
+    enc_train_df = full_df[full_df["user_id"].isin(enc_train_clients)]
+    enc_val_df = full_df[full_df["user_id"].isin(val_clients)]
+    crossval_df = full_df[full_df["user_id"].isin(crossval_clients)]
+    test_df = full_df[full_df["user_id"].isin(test_clients)]
 
     return (
-        ClientTransactionsDataset(enc_train_df, cat_features, sep_events=add_sep),
-        ClientTransactionsDataset(enc_val_df, cat_features, sep_events=add_sep),
-        ClientTransactionsDataset(crossval_df, cat_features, sep_events=add_sep),
-        ClientTransactionsDataset(test_df, cat_features, sep_events=add_sep),
+        ClientTransactionsDataset(enc_train_df, cat_features),
+        ClientTransactionsDataset(enc_val_df, cat_features),
+        ClientTransactionsDataset(crossval_df, cat_features),
+        ClientTransactionsDataset(test_df, cat_features),
         vocab_sizes
     )
 
@@ -350,7 +293,6 @@ def create_local_dataset(
     device,
     window_len: int = 32,
     window_stride: int = 32,
-    sep_events: bool = False,
     global_embed: bool = False
 ):
     enc.eval()
@@ -363,10 +305,7 @@ def create_local_dataset(
     for _, seq, _ in tqdm(dl): # type: ignore
         seq = seq[0].to(device)
 
-        if sep_events:
-            normal_mask = seq[:, -1] == 0
-        else:
-            normal_mask = torch.ones_like(seq[:, -1])
+        normal_mask = torch.ones_like(seq[:, -1])
         real_events = torch.where(normal_mask)[0]
 
         for idx in range(0, real_events.shape[0] - window_len, window_stride):

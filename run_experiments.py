@@ -16,11 +16,9 @@ with open("cv_param_grid.yaml") as f:
 
 
 enc_train_dataset, enc_val_dataset, classifier_cv_dataset, test_dataset, vocab_sizes = load_and_split_data(
-    "pytorch-lifestream/rosbank-churn", 
-    "pytorch-lifestream/rosbank-churn",
+    param_grid[0]["dataset"], 
     cat_features=param_grid[0]["cat_features"],
     cat_coverage=param_grid[0]["cat_coverage"],
-    add_sep=param_grid[0]["add_sep"]
 )
 
 dagshub.init("event-sequence-embeddings", "reizkh")
